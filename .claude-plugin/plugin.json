@@ -1,0 +1,8 @@
+{
+  "name": "veris-skills",
+  "description": "Claude Code skills for integrating agents with veris-sandbox simulation framework",
+  "version": "1.0.0",
+  "author": {
+    "name": "Veris AI"
+  }
+}
