@@ -12,6 +12,27 @@ git clone git@github.com:veris-ai/veris-skills.git ~/.claude/skills/veris-skills
 
 ## Available Skills
 
+### `/agent-integration`
+
+Integrate a raw customer agent repo with Veris from scratch. Handles CLI/bootstrap, `.veris/` scaffolding, `veris.yaml`, `Dockerfile.sandbox`, runtime env vars, and can finish with `veris env push`.
+
+- Starts from repos with no Veris setup at all
+- Refreshes stale `.veris/` integrations to current conventions
+- Supports HTTP, WebSocket, email, and function-channel integrations
+- Carries through to an actual `veris env push`
+
+```
+/agent-integration path/to/agent/repo
+```
+
+### `/integrate-agent` (legacy)
+
+Older integration skill that assumes `.veris/` already exists. Kept for compatibility, but `agent-integration` is the preferred from-scratch workflow.
+
+```
+/integrate-agent path/to/agent/repo
+```
+
 ### `/grader-generator`
 
 Generate failure-mode graders for evaluating AI agents. Given an agent's source code, creates a comprehensive multi-layer grader with atomic checks organized by category.

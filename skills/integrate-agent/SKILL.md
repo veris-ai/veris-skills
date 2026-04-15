@@ -1,7 +1,9 @@
 ---
 name: integrate-agent
-description: Convert an existing agent's infrastructure into a veris-sandbox single-container setup. Analyzes docker-compose, Dockerfiles, env files, and source code to generate veris.yaml, Dockerfile.sandbox, .env.simulation, and start.sh. Use after running `veris init`.
+description: Legacy maintenance workflow for older Veris-integrated repos that already have `.veris/` scaffolding and need targeted updates. Prefer `agent-integration` for any new or from-scratch integration work.
 ---
+
+LEGACY SKILL. Prefer `agent-integration` for new integrations or for repos that do not already have a working `.veris/` setup.
 
 Integrate an agent with veris-sandbox: $ARGUMENTS
 
