@@ -25,14 +25,6 @@ Integrate a raw customer agent repo with Veris from scratch. Handles CLI/bootstr
 /agent-integration path/to/agent/repo
 ```
 
-### `/integrate-agent` (legacy)
-
-Older integration skill that assumes `.veris/` already exists. Kept for compatibility, but `agent-integration` is the preferred from-scratch workflow.
-
-```
-/integrate-agent path/to/agent/repo
-```
-
 ### `/grader-generator`
 
 Generate failure-mode graders for evaluating AI agents. Given an agent's source code, creates a comprehensive multi-layer grader with atomic checks organized by category.
