@@ -42,7 +42,8 @@ for port in 8081 8082; do
 done
 
 # Start gateway (foreground — must be last, must use exec)
-exec bash -lc 'cd /agent/gateway && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}'
+cd /agent/gateway
+exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
 ## Template 3: FastAPI + background workers
@@ -74,5 +75,6 @@ exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 - Use `${PORT:-8080}` to respect veris port injection.
 - Never use supervisord in sandbox -- start.sh is simpler and sufficient.
 - Veris already starts `start.sh` from `agent.code_path`, so do not add a redundant `cd /agent` at the top.
-- If you must launch work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/worker && python main.py) &` or `exec bash -lc 'cd /agent/gateway && ...'`.
+- If you must launch background work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/worker && python main.py) &`.
+- If the foreground process lives in a subdirectory, `cd` there immediately before the final `exec`.
 - If a background process fails, the container continues -- that's intentional for simulation.

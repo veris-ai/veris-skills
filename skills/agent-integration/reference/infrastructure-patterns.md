@@ -451,10 +451,11 @@ for port in 8081 8082 8083; do
 done
 
 # Start gateway in foreground
-exec bash -lc 'cd /agent/gateway && uvicorn main:app --host 0.0.0.0 --port 8080'
+cd /agent/gateway
+exec uvicorn main:app --host 0.0.0.0 --port 8080
 ```
 
-Veris already launches `start.sh` from `agent.code_path`. If you need to start work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/flight-agent && ...) &` or `exec bash -lc 'cd /agent/gateway && ...'`.
+Veris already launches `start.sh` from `agent.code_path`. If you need to start background work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/flight-agent && ...) &`. If the foreground process lives in a subdirectory, `cd` there immediately before the final `exec`.
 
 **4. Override inter-agent communication URLs:**
 
@@ -559,7 +560,8 @@ echo "RabbitMQ is ready."
 (cd /agent/backend/image-processor && python main.py) &
 
 # Start frontend in foreground
-exec bash -lc 'cd /agent/frontend && npx next start -p 8080'
+cd /agent/frontend
+exec npx next start -p 8080
 ```
 
 **4. veris.yaml:**
