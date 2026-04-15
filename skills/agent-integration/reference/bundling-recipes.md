@@ -252,7 +252,7 @@ MEMCACHED_URL=localhost:11211
 
 ---
 
-## Node.js Runtime (for Node.js agents)
+## Node.js Version Override (only when the repo needs a different Node.js version)
 
 **Weight: Light** — ~0 MB extra memory (runtime only), ~80 MB image size increase.
 
@@ -264,7 +264,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     rm -rf /var/lib/apt/lists/*
 ```
 
-**Notes:** The base image has Python 3.12 but does NOT include Node.js. Install this if the agent is Node/TypeScript. This includes npm. For pnpm: `RUN npm install -g pnpm`. For yarn: `RUN npm install -g yarn`.
+**Notes:** The current base image already includes Node.js. Use this only when the repo requires a different Node.js version than the base image ships with. This includes npm. For pnpm: `RUN npm install -g pnpm`. For yarn: `RUN npm install -g yarn`.
 
 ---
 

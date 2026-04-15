@@ -18,10 +18,10 @@ actor:
   init:                             # Optional pre-message setup call
     type: http
     method: POST
-    url: http://localhost:8008/api/session
+    url: http://localhost:8080/api/session
   channels:
     - type: http                    # http | ws | email | function | voice | browser-use
-      url: http://localhost:8008/chat
+      url: http://localhost:8080/chat
       method: POST
       headers:
         Content-Type: application/json
@@ -40,7 +40,7 @@ actor:
 agent:
   code_path: /agent
   entry_point: python -m app.main
-  port: 8008
+  port: 8080
   environment:
     DATABASE_URL: postgresql://postgres:postgres@localhost:5432/SIMULATION_ID
     LOG_LEVEL: info
@@ -82,7 +82,7 @@ Notes:
 actor:
   channels:
     - type: http
-      url: http://localhost:8008/chat
+      url: http://localhost:8080/chat
       method: POST
       request:
         message_field: message
@@ -98,7 +98,7 @@ actor:
 actor:
   channels:
     - type: ws
-      url: ws://localhost:8008/ws
+      url: ws://localhost:8080/ws
       request:
         message_field: message
         session_field: session_id
@@ -141,7 +141,7 @@ Function-channel rules:
 actor:
   channels:
     - type: http
-      url: http://localhost:8008/chat
+      url: http://localhost:8080/chat
       request:
         message_field: message
       response:
@@ -161,12 +161,14 @@ Use this when the agent streams user-visible content through SSE.
 agent:
   name: Billing Assistant           # Optional display name
   code_path: /agent
-  entry_point: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8008
-  port: 8008
+  entry_point: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8080
+  port: 8080
   environment:
     DATABASE_URL: postgresql://postgres:postgres@localhost:5432/SIMULATION_ID
     SERVICE_BASE_URL: http://localhost:9000
 ```
+
+If you reference service config artifacts like `SCHEMA_PATH: /agent/db/schema.sql`, make sure `.veris/Dockerfile.sandbox` copies that directory into the image.
 
 Rules:
 - `code_path` is usually `/agent`

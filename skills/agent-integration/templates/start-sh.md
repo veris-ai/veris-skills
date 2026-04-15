@@ -14,7 +14,6 @@ until redis-cli ping 2>/dev/null | grep -q PONG; do sleep 0.5; done
 echo "Redis ready"
 
 # Start agent (foreground — must be last, must use exec)
-cd /agent
 exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
@@ -27,11 +26,8 @@ set -e
 echo "Starting sub-agents..."
 
 # Start sub-agents in background
-cd /agent/flight-agent
-uvicorn main:app --host 0.0.0.0 --port 8081 &
-
-cd /agent/hotel-agent
-uvicorn main:app --host 0.0.0.0 --port 8082 &
+(cd /agent/flight-agent && uvicorn main:app --host 0.0.0.0 --port 8081) &
+(cd /agent/hotel-agent && uvicorn main:app --host 0.0.0.0 --port 8082) &
 
 # Wait for sub-agents to be ready
 echo "Waiting for sub-agents..."
@@ -46,8 +42,7 @@ for port in 8081 8082; do
 done
 
 # Start gateway (foreground — must be last, must use exec)
-cd /agent/gateway
-exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
+exec bash -lc 'cd /agent/gateway && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}'
 ```
 
 ## Template 3: FastAPI + background workers
@@ -57,8 +52,6 @@ exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
 set -e
 
 echo "Starting background workers..."
-
-cd /agent
 
 # Start Celery worker (or other background processor)
 python -m app.workers.celery_worker \
@@ -80,5 +73,6 @@ exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 - `set -e` at the top: exit immediately on any error.
 - Use `${PORT:-8080}` to respect veris port injection.
 - Never use supervisord in sandbox -- start.sh is simpler and sufficient.
-- Use absolute paths (`/agent/...`) inside start.sh for clarity — background processes with `&` make relative `cd` fragile. Note: entry_point in veris.yaml uses relative paths (entrypoint.sh cd's to code_path first), but start.sh internals should use absolute paths.
+- Veris already starts `start.sh` from `agent.code_path`, so do not add a redundant `cd /agent` at the top.
+- If you must launch work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/worker && python main.py) &` or `exec bash -lc 'cd /agent/gateway && ...'`.
 - If a background process fails, the container continues -- that's intentional for simulation.

@@ -40,6 +40,8 @@ agent:
     LOG_LEVEL: info
 ```
 
+If you use `SCHEMA_PATH: /agent/db/schema.sql`, make sure `.veris/Dockerfile.sandbox` also copies `db/` into `/agent/db/`.
+
 ## Example 2: One-shot function agent
 
 ```yaml
@@ -88,8 +90,8 @@ actor:
 
 agent:
   code_path: /agent
-  entry_point: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8008
-  port: 8008
+  entry_point: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8080
+  port: 8080
   environment:
     SALESFORCE_DOMAIN: mock-salesforce
 ```

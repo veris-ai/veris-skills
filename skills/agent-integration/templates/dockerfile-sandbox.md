@@ -75,20 +75,9 @@ RUN npm run build
 
 ## Template 4: Function-channel Python agent
 
-```dockerfile
-ARG GVISOR_BASE
-FROM ${GVISOR_BASE}
+Use Template 1 or Template 2, depending on whether the repo uses `uv` or `pip`.
 
-COPY pyproject.toml uv.lock /agent/
-WORKDIR /agent
-RUN uv sync --frozen --no-dev
-
-COPY app /agent/app
-
-WORKDIR /app
-```
-
-A function-channel integration usually needs the same dependency install as any other Python repo. The difference is in `veris.yaml`: no `entry_point` and no `port`.
+A function-channel integration usually needs the same dependency install as any other Python repo. The difference is in `veris.yaml`: no `entry_point` and no `port`. See [reference/veris-yaml-schema.md](../reference/veris-yaml-schema.md) for the function-channel shape.
 
 ## Template 5: Bundled Redis + `start.sh`
 

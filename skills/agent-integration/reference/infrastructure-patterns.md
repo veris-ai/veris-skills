@@ -14,7 +14,7 @@ Everything runs in ONE Docker container. The agent's code is COPY'd to `/agent/`
 At startup, veris's `entrypoint.sh` does `cd $AGENT_CODE_PATH` (from `agent.code_path` in veris.yaml, typically `/agent`), then runs the entry_point command. This means **all entry_point paths are relative to code_path**.
 
 **Reserved Veris ports (do NOT use for the agent):** 6100-6299, 5432, 443.
-**Recommended agent ports:** 8080, 8008, 3000.
+**Recommended agent ports:** 8080, 3000, 3001.
 
 ---
 
@@ -39,7 +39,8 @@ Look for these signals in `docker-compose.yml`:
 
 ```dockerfile
 # Dockerfile.sandbox
-FROM gcr.io/veris-ai-dev/veris-gvisor:latest
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
 
 COPY requirements.txt /agent/
 WORKDIR /agent
@@ -121,7 +122,8 @@ Veris has its own nginx for TLS termination. The agent's nginx reverse proxy con
 
 ```dockerfile
 # Dockerfile.sandbox
-FROM gcr.io/veris-ai-dev/veris-gvisor:latest
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
 
 COPY requirements.txt /agent/
 WORKDIR /agent
@@ -250,7 +252,8 @@ Veris intercepts calls to `api.openai.com`, `api.anthropic.com`, and Azure OpenA
 
 ```dockerfile
 # Dockerfile.sandbox
-FROM gcr.io/veris-ai-dev/veris-gvisor:latest
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
 
 # Install Azurite (Azure Blob emulator)
 RUN npm install -g azurite
@@ -311,7 +314,8 @@ agent:
 
 ```dockerfile
 # Dockerfile.sandbox — Node.js agent example
-FROM gcr.io/veris-ai-dev/veris-gvisor:latest
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
 
 # Copy agent code and install dependencies
 COPY package.json package-lock.json /agent/
@@ -393,7 +397,8 @@ Next.js API routes (`app/api/*/route.ts`) work as-is — they are standard HTTP 
 
 ```dockerfile
 # Dockerfile.sandbox
-FROM gcr.io/veris-ai-dev/veris-gvisor:latest
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
 
 # Install all dependencies from all sub-agents
 COPY gateway/requirements.txt /tmp/gateway-req.txt
@@ -434,9 +439,9 @@ agent:
 #!/bin/bash
 
 # Start sub-agents in background
-cd /agent/flight-agent && uvicorn main:app --host 0.0.0.0 --port 8081 &
-cd /agent/hotel-agent && uvicorn main:app --host 0.0.0.0 --port 8082 &
-cd /agent/itinerary-agent && uvicorn main:app --host 0.0.0.0 --port 8083 &
+(cd /agent/flight-agent && uvicorn main:app --host 0.0.0.0 --port 8081) &
+(cd /agent/hotel-agent && uvicorn main:app --host 0.0.0.0 --port 8082) &
+(cd /agent/itinerary-agent && uvicorn main:app --host 0.0.0.0 --port 8083) &
 
 # Wait for sub-agents to be ready
 for port in 8081 8082 8083; do
@@ -446,11 +451,10 @@ for port in 8081 8082 8083; do
 done
 
 # Start gateway in foreground
-cd /agent/gateway
-exec uvicorn main:app --host 0.0.0.0 --port 8080
+exec bash -lc 'cd /agent/gateway && uvicorn main:app --host 0.0.0.0 --port 8080'
 ```
 
-Use absolute paths inside start.sh for clarity — background processes with `&` make relative `cd` fragile.
+Veris already launches `start.sh` from `agent.code_path`. If you need to start work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/flight-agent && ...) &` or `exec bash -lc 'cd /agent/gateway && ...'`.
 
 **4. Override inter-agent communication URLs:**
 
@@ -519,7 +523,8 @@ The persona interacts with the frontend (HTTP chat endpoint). The frontend port 
 
 ```dockerfile
 # Dockerfile.sandbox
-FROM gcr.io/veris-ai-dev/veris-gvisor:latest
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
 
 # Install RabbitMQ (if needed as message broker)
 RUN apt-get update && apt-get install -y rabbitmq-server && rm -rf /var/lib/apt/lists/*
@@ -550,12 +555,11 @@ until rabbitmqctl status > /dev/null 2>&1; do sleep 1; done
 echo "RabbitMQ is ready."
 
 # Start Python workers in background
-cd /agent/backend/content-worker && python main.py &
-cd /agent/backend/image-processor && python main.py &
+(cd /agent/backend/content-worker && python main.py) &
+(cd /agent/backend/image-processor && python main.py) &
 
 # Start frontend in foreground
-cd /agent/frontend
-exec npx next start -p 8080
+exec bash -lc 'cd /agent/frontend && npx next start -p 8080'
 ```
 
 **4. veris.yaml:**
@@ -688,7 +692,7 @@ Agent ports must NOT conflict with Veris service ports:
 | 6100-6199 | Veris infrastructure services |
 | 6200-6299 | Veris mock/application services |
 
-**Safe agent ports:** 8080, 8008, 3000, 3001, 4000, 5000, 9000.
+**Safe agent ports:** 8080, 3000, 3001, 4000, 5000, 8008, 9000.
 
 ### Hostname translation
 
@@ -719,7 +723,7 @@ some-service --daemon &
 until some-health-check; do sleep 1; done
 
 # ---- Background workers ----
-cd /agent/worker && python main.py &
+(cd /agent/worker && python main.py) &
 
 # ---- Foreground: main agent process ----
 exec uvicorn app.main:app --host 0.0.0.0 --port 8080

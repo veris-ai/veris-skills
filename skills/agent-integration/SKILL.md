@@ -54,7 +54,7 @@ Treat any existing `.veris/` files or old scaffold output as starting material o
 ## Phase 0: Bootstrap Veris Tooling And Environment
 [Phase 0/6]
 
-Tell the user: "I’m going to make sure this repo has the Veris tooling and environment wiring needed for the rest of the integration work."
+Tell the user: "I'm going to make sure this repo has the Veris tooling and environment wiring needed for the rest of the integration work."
 
 If `$ARGUMENTS` includes a path, use that as the repo root. Otherwise use the current working directory.
 
@@ -112,7 +112,7 @@ Proceed directly to Phase 1.
 ## Phase 1: Discover The Repo And Current Runtime
 [Phase 1/6]
 
-Tell the user: "I’m going to inventory how this repo currently runs, what it depends on, and how users interact with it."
+Tell the user: "I'm going to inventory how this repo currently runs, what it depends on, and how users interact with it."
 
 ### 1.1 Existing Veris state
 
@@ -208,7 +208,7 @@ Proceed to Phase 2.
 ## Phase 2: Analyze Dependencies And Service Strategy
 [Phase 2/6]
 
-Tell the user: "I’m now classifying each dependency into mock, bundle, external, or skip."
+Tell the user: "I'm now classifying each dependency into mock, bundle, external, or skip."
 
 Read:
 - [reference/service-mapping.md](reference/service-mapping.md)
@@ -263,7 +263,7 @@ Wait for approval before proceeding.
 ## Phase 3: Choose Integration Mode And Container Architecture
 [Phase 3/6]
 
-Tell the user: "I’m locking down how this agent will run inside the Veris container and how the actor will talk to it."
+Tell the user: "I'm locking down how this agent will run inside the Veris container and how the actor will talk to it."
 
 Read [reference/infrastructure-patterns.md](reference/infrastructure-patterns.md).
 
@@ -315,7 +315,7 @@ Wait for approval before proceeding.
 ## Phase 4: Generate `.veris/veris.yaml`
 [Phase 4/6]
 
-Tell the user: "I’m generating the final Veris configuration in the current preferred schema."
+Tell the user: "I'm generating the final Veris configuration in the current preferred schema."
 
 Read:
 - [reference/veris-yaml-schema.md](reference/veris-yaml-schema.md)
@@ -355,7 +355,7 @@ Show the complete `veris.yaml`, explain the sections, and get approval before wr
 ## Phase 5: Generate `.veris/Dockerfile.sandbox` And Supporting Files
 [Phase 5/6]
 
-Tell the user: "I’m generating the image build and any small support files needed for this integration."
+Tell the user: "I'm generating the image build and any small support files needed for this integration."
 
 Read:
 - [templates/dockerfile-sandbox.md](templates/dockerfile-sandbox.md)
@@ -404,7 +404,7 @@ Proceed directly to Phase 6 once the files are in place.
 ## Phase 6: Configure Runtime Env Vars, Validate, And Push
 [Phase 6/6]
 
-Tell the user: "I’m turning this into a pushable Veris environment."
+Tell the user: "I'm turning this into a pushable Veris environment."
 
 Read:
 - [templates/env-vars.md](templates/env-vars.md)

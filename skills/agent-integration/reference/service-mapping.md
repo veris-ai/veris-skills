@@ -18,7 +18,6 @@ Use this file when deciding what to put in `services:` and when migrating stale 
 | Shopify Storefront (MCP) | `mcp/shopify-storefront` | `SHOPIFY_*`, storefront APIs |
 | Shopify Customer (MCP) | `mcp/shopify-customer` | customer account APIs, `account.myshopify.com` |
 | Slack | `slack` | `slack_sdk`, `slack_bolt`, `@slack/web-api`, `SLACK_*` |
-| Hogan / core banking | `hogan` | `HOGAN_*`, `WF_*` |
 | Zendesk | `zendesk-support` | `zendesk`, `ZENDESK_*`, `*.zendesk.com` |
 | Twilio | `twilio` | `twilio`, `TWILIO_*`, `api.twilio.com` |
 | Microsoft Graph | `microsoft/graph` | `msgraph`, `O365`, `GRAPH_*`, `graph.microsoft.com` |
