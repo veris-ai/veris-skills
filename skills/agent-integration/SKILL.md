@@ -1,0 +1,491 @@
+---
+name: agent-integration
+description: Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, any needed startup wrappers, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.
+---
+
+Integrate this agent repo with Veris from scratch: $ARGUMENTS
+
+This skill takes a repo from "plain customer agent source" to "Veris-ready and pushable."
+
+Treat any existing `.veris/` files or old scaffold output as starting material only. Use the current bundled references in this skill as the source of truth for what you generate.
+
+## Core rules
+
+- Explain what you are about to do before each major step.
+- Surface decisions with real tradeoffs and let the user choose.
+- Cite concrete evidence from the repo when you classify dependencies or decide how the agent should be integrated.
+- Do not silently preserve stale Veris config. Migrate it to the current preferred shape.
+- Do not generate `.env.simulation`. The current runtime flow is `agent.environment` plus `veris env vars set`.
+- Prefer the current `actor.channels` schema and canonical service names. Do not generate legacy `persona.modality`, `email_address`, or old service aliases unless the user explicitly asks for compatibility.
+- Ask before external or irreversible actions:
+  - installing `veris-cli`
+  - running `veris login`
+  - running `veris env create`
+  - setting environment variables with `veris env vars set`
+  - pushing with `veris env push`
+
+## Read these files when needed
+
+- For current service names and detection: [reference/service-mapping.md](reference/service-mapping.md)
+- For env overrides and mock credentials: [reference/env-var-overrides.md](reference/env-var-overrides.md)
+- For bundleable local infra: [reference/bundling-recipes.md](reference/bundling-recipes.md)
+- For container restructuring patterns: [reference/infrastructure-patterns.md](reference/infrastructure-patterns.md)
+- For current `veris.yaml` structure: [reference/veris-yaml-schema.md](reference/veris-yaml-schema.md)
+- For generated config examples: [templates/veris-yaml.md](templates/veris-yaml.md)
+- For Dockerfile patterns: [templates/dockerfile-sandbox.md](templates/dockerfile-sandbox.md)
+- For runtime env var handling: [templates/env-vars.md](templates/env-vars.md)
+- For multi-process startup scripts: [templates/start-sh.md](templates/start-sh.md)
+- For integration failures: [phases/troubleshooting.md](phases/troubleshooting.md)
+
+## Workflow Overview
+
+| Phase | Goal |
+| --- | --- |
+| 0 | Bootstrap Veris tooling and environment |
+| 1 | Discover the repo and current runtime |
+| 2 | Analyze dependencies and service strategy |
+| 3 | Choose integration mode and container architecture |
+| 4 | Generate `.veris/veris.yaml` |
+| 5 | Generate `.veris/Dockerfile.sandbox` and supporting files |
+| 6 | Configure runtime env vars, validate, and push |
+
+---
+
+## Phase 0: Bootstrap Veris Tooling And Environment
+[Phase 0/6]
+
+Tell the user: "I'm going to make sure this repo has the Veris tooling and environment wiring needed for the rest of the integration work."
+
+If `$ARGUMENTS` includes a path, use that as the repo root. Otherwise use the current working directory.
+
+### 0.1 Verify repo root
+
+Confirm the directory is an agent repo, not just a parent folder. Look for source code, dependency manifests, and app entrypoints.
+
+### 0.2 Verify `veris-cli`
+
+Check whether `veris` is installed and working.
+
+If not installed:
+- Prefer `uv tool install veris-cli`
+- Fallback: `pip install veris-cli`
+
+Explain which install path you are using and why.
+
+### 0.3 Verify Veris authentication
+
+Check whether the user is already logged in and which profile/backend they are using.
+
+If not authenticated:
+- Recommend `veris login` for browser auth
+- Use API-key login only if the user explicitly prefers it
+
+Do not proceed to `veris env push` until auth is working.
+
+### 0.4 Verify or create `.veris/`
+
+Inspect:
+- `.veris/config.yaml`
+- `.veris/veris.yaml`
+- `.veris/Dockerfile.sandbox`
+- `.veris/.dockerignore`
+
+If `.veris/` does not exist, or it exists but has no environment binding:
+1. Derive a candidate environment name from the repo directory.
+2. Show the user the proposed name.
+3. On approval, run `veris env create --name "<name>"`.
+
+Explain what `veris env create` gives them:
+- `.veris/veris.yaml` — Veris simulation config
+- `.veris/Dockerfile.sandbox` — image build definition
+- `.veris/.dockerignore` — build-context exclusions
+- `.veris/config.yaml` — environment binding for this repo
+
+### 0.5 Treat scaffolding as placeholders, not truth
+
+The generated `.veris/` files are just a starting point. They may use old defaults or generic placeholders. You are responsible for replacing them with the correct integration for this repo.
+
+Proceed directly to Phase 1.
+
+---
+
+## Phase 1: Discover The Repo And Current Runtime
+[Phase 1/6]
+
+Tell the user: "I'm going to inventory how this repo currently runs, what it depends on, and how users interact with it."
+
+### 1.1 Existing Veris state
+
+If `.veris/` already exists, read all existing Veris files first. Call out anything that looks stale or legacy:
+- `persona.modality`
+- `email_address`
+- old service names like `crm`, `calendar`, `oracle`
+- missing `.veris/config.yaml` env binding
+- assumptions that conflict with the current docs
+
+### 1.2 Infrastructure files
+
+Read and summarize any of:
+- `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`
+- `Dockerfile`, `Dockerfile.*`
+- `Procfile`
+- `supervisord.conf`, `supervisord.ini`
+- `vercel.json`, `serverless.yml`, `netlify.toml`
+- Kubernetes manifests
+
+Identify:
+- which process is the user-facing agent
+- what other services exist
+- how the system currently starts
+
+### 1.3 Environment and secrets
+
+Read:
+- `.env.example`, `.env.sample`, `.env.template`
+- config/settings modules
+- secret or vault references
+
+Collect every env var the agent reads, and note which are:
+- stable non-secrets
+- secrets
+- service endpoints
+- optional or debug-only
+
+### 1.4 Dependencies
+
+Read the package manifests for the repo’s language/runtime and identify:
+- package manager
+- framework
+- Python/Node runtime assumptions
+- SDKs for external services
+
+### 1.5 Source-code entrypoints
+
+Find the actual code path that handles incoming user work:
+- app/server entrypoint
+- chat/message handler
+- config/settings module
+- request routing
+- any background worker or webhook listener that matters during a user conversation
+
+### 1.6 Determine the integration interface
+
+This is critical. Determine how the simulated actor should talk to the agent.
+
+Look for four classes of interfaces:
+
+**HTTP**
+- Chat endpoint
+- Request/response body shape
+- Session or conversation field
+- JSON or SSE response style
+
+**WebSocket**
+- WS route
+- Message framing
+- Session handling
+
+**Email**
+- Inbox address
+- Polling or webhook flow
+
+**Function**
+- A clean Python callable or command-line entry that accepts a user request and returns a response
+- Existing `handle_message`-style functions
+- Places where a thin wrapper file could expose a callable with minimal code changes
+
+If both network and function modes are viable, prefer the repo’s real product interface unless:
+- the agent is clearly one-shot/stateless
+- a function channel would be substantially simpler
+- the user agrees to that integration mode
+
+Tell the user exactly what you found and confirm the likely best integration path before continuing.
+
+Proceed to Phase 2.
+
+---
+
+## Phase 2: Analyze Dependencies And Service Strategy
+[Phase 2/6]
+
+Tell the user: "I'm now classifying each dependency into mock, bundle, external, or skip."
+
+Read:
+- [reference/service-mapping.md](reference/service-mapping.md)
+- [reference/env-var-overrides.md](reference/env-var-overrides.md)
+- [reference/bundling-recipes.md](reference/bundling-recipes.md)
+
+For every dependency, classify it as one of:
+
+1. **Mock with Veris**
+2. **Bundle inside the container**
+3. **Use an external endpoint**
+4. **Skip entirely**
+5. **Needs discussion**
+
+### Classification rules
+
+- Always read the source code before deciding. Do not infer importance from service names alone.
+- Show evidence when you decide something is skippable.
+- Surface bundle cost when it matters, especially for heavy services like Elasticsearch or LocalStack.
+- Prefer mock services when the dependency maps cleanly to Veris.
+- Prefer env-var overrides over code changes whenever possible.
+
+### Special cases
+
+**Postgres**
+- Decide whether to use Veris `postgres` or an external DB
+- If using Veris `postgres`, find the schema artifact or migration source and determine the best copy path
+
+**LLM providers**
+- No Veris service entry is needed
+- The LLM proxy intercepts supported domains automatically
+
+**Email**
+- If the actor uses an email channel, note that the Veris email service is injected automatically
+
+**Auth helpers**
+- Google/Microsoft/Atlassian/Intuit auth helpers are platform-level helpers, not services you should normally add manually
+
+### Checkpoint
+
+Walk through your dependency analysis with the user before moving on. The user should understand:
+- what will be mocked
+- what will be bundled
+- what stays external
+- what gets skipped
+- what still needs a decision
+
+Wait for approval before proceeding.
+
+---
+
+## Phase 3: Choose Integration Mode And Container Architecture
+[Phase 3/6]
+
+Tell the user: "I'm locking down how this agent will run inside the Veris container and how the actor will talk to it."
+
+Read [reference/infrastructure-patterns.md](reference/infrastructure-patterns.md).
+
+### 3.1 Choose the channel strategy
+
+Pick one of:
+
+- **HTTP** — preferred when the product is already an HTTP chat API
+- **WebSocket** — preferred when real-time stateful messaging is core
+- **Email** — preferred when the product is genuinely email-driven
+- **Function** — preferred when the repo has a clean callable path or should be treated as a one-shot request/response agent
+
+### 3.2 Function-channel rules
+
+If you choose a function channel:
+- The callable path must be explicit and importable/launchable
+- If the repo does not already expose one cleanly, create the thinnest possible wrapper file
+- Omit `agent.entry_point` and `agent.port` in `veris.yaml`
+- If the callable is one-shot and stateless, set `actor.config.MAX_TURNS: 1`
+
+### 3.3 Network-channel rules
+
+If you choose HTTP / WS / email:
+- determine the exact request and response mappings
+- determine the startup command
+- choose a non-reserved port
+- decide whether `start.sh` is needed for bundled infra or multiple processes
+
+### 3.4 Container layout
+
+Determine:
+- what gets copied into `/agent`
+- which files should stay out of the image
+- whether a `start.sh` or wrapper file is required
+- which code changes are truly necessary
+
+### Checkpoint
+
+Explain:
+- how the actor will communicate with the agent
+- how the agent will start inside the container
+- what files will be copied
+- what code changes are needed, if any
+
+Wait for approval before proceeding.
+
+---
+
+## Phase 4: Generate `.veris/veris.yaml`
+[Phase 4/6]
+
+Tell the user: "I'm generating the final Veris configuration in the current preferred schema."
+
+Read:
+- [reference/veris-yaml-schema.md](reference/veris-yaml-schema.md)
+- [templates/veris-yaml.md](templates/veris-yaml.md)
+
+### Rules
+
+- Use `actor.channels`, not `persona.modality`
+- Use canonical service names from `reference/service-mapping.md`
+- Use `agent_inbox`, not `email_address`
+- Only set `actor.config.MAX_TURNS` when there is a concrete reason, usually a one-shot function integration
+- Do not add the `*_INTERVAL` knobs unless the user explicitly asks for advanced tuning
+- Keep secrets out of `veris.yaml`
+- Put stable non-secret defaults in `agent.environment`
+- Only use `${VAR}` in `agent.environment` when you need expansion/composition; if the agent can read a runtime env var directly, prefer setting it with `veris env vars set`
+
+### Channel-specific rules
+
+**HTTP / WS / Email**
+- include `agent.code_path`
+- include `agent.entry_point`
+- include `agent.port`
+
+**Function**
+- include `agent.code_path`
+- omit `agent.entry_point`
+- omit `agent.port`
+- set `actor.channels[0].type: function`
+- set `callable: ...`
+
+### Checkpoint
+
+Show the complete `veris.yaml`, explain the sections, and get approval before writing or finalizing it.
+
+---
+
+## Phase 5: Generate `.veris/Dockerfile.sandbox` And Supporting Files
+[Phase 5/6]
+
+Tell the user: "I'm generating the image build and any small support files needed for this integration."
+
+Read:
+- [templates/dockerfile-sandbox.md](templates/dockerfile-sandbox.md)
+- [templates/start-sh.md](templates/start-sh.md)
+
+### 5.1 Dockerfile rules
+
+- Start with:
+
+```dockerfile
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
+```
+
+- Build context is the repo root
+- Copy dependency manifests before source code
+- Copy only what the agent actually needs
+- End with `WORKDIR /app`
+- Do not bake `veris.yaml` into the image
+
+### 5.2 Runtime notes
+
+- The current base image already includes Python, `uv`, and Node.js
+- Only install extra runtimes or system packages when the repo truly needs them
+- If using a function channel, you still package the agent code and dependencies normally; you just do not start a network server
+
+### 5.3 Supporting files
+
+Create only what is needed:
+- `start.sh` for bundled services or multi-process startup
+- thin function wrapper module if a callable integration needs one
+- minimal code patches for env-var overrides or startup behavior
+- `.veris/.dockerignore` updates if the repo has large directories the default ignore file misses
+
+### 5.4 Code-change rules
+
+- Keep changes minimal and local
+- Prefer env overrides over code edits
+- Explain each code change before making it
+- Do not refactor unrelated code
+
+Proceed directly to Phase 6 once the files are in place.
+
+---
+
+## Phase 6: Configure Runtime Env Vars, Validate, And Push
+[Phase 6/6]
+
+Tell the user: "I'm turning this into a pushable Veris environment."
+
+Read:
+- [templates/env-vars.md](templates/env-vars.md)
+- [phases/troubleshooting.md](phases/troubleshooting.md)
+
+### 6.1 Build the env-var plan
+
+Classify env vars into:
+
+1. **Stable non-secret defaults** → put in `agent.environment`
+2. **Secrets / per-environment values** → set with `veris env vars set`
+3. **Local-only convenience values** → optional root `.env` or shell exports for local smoke tests
+
+Do not create `.env.simulation`.
+
+### 6.2 Produce exact commands
+
+Generate the exact `veris env vars set` commands the user needs.
+
+If the user provides actual values and wants you to do it, run the commands for them.
+
+### 6.3 Validate push preconditions
+
+Before pushing, verify:
+- `veris` is installed
+- auth/profile works
+- `.veris/config.yaml` has an environment ID
+- `.veris/veris.yaml` exists
+- `.veris/Dockerfile.sandbox` exists
+
+Optional but encouraged:
+- run a local `docker build -f .veris/Dockerfile.sandbox .` smoke test when that is likely to catch obvious breakage quickly
+
+### 6.4 Push
+
+If the user approves, run:
+
+```bash
+veris env push
+```
+
+Or with an explicit tag if the user wants one:
+
+```bash
+veris env push --tag <tag>
+```
+
+If the push fails:
+- diagnose the failing build step
+- fix the integration
+- retry
+
+### 6.5 Final summary
+
+Summarize:
+- files created or modified
+- integration mode chosen
+- services mocked, bundled, external, or skipped
+- env vars set vs left for the user
+- whether `veris env push` succeeded and which tag was created
+
+Then suggest the next commands:
+- `veris scenarios create`
+- `veris simulations create`
+
+---
+
+## Practical guidance
+
+### Prefer current conventions over stale scaffolding
+
+If `veris env create` scaffolds old-looking placeholders, overwrite them with the current preferred shape from this skill.
+
+### Keep the skill honest about function channels
+
+Use a function channel only when it is truly the right fit. Do not force a networked product into a function callable just because it seems simpler.
+
+### Keep the skill honest about one-shot agents
+
+If the integrated agent is clearly one-shot/stateless, carry that through explicitly by setting `actor.config.MAX_TURNS: 1`.
+
+### Be explicit about what you did not automate
+
+If login, secrets, or env-var values still require user action, say so plainly. The goal is to get as far as possible, not to hide blockers.
