@@ -466,6 +466,8 @@ Generate the exact `veris env vars set` commands the user needs.
 
 If the user provides actual values and wants you to do it, run the commands for them.
 
+**Shell interpolation pitfall:** when running `veris env vars set KEY="$VAR" --secret` with a shell variable, verify the source variable is actually set first (`printenv VAR` or `test -n "$VAR"`). An empty or unset variable expands to `""` silently — the CLI will happily save an empty secret with no error, and the agent will fail at runtime with a confusing auth/provider error instead of a clear "missing key" message.
+
 ### 6.3 Validate push preconditions
 
 Before pushing, verify:
