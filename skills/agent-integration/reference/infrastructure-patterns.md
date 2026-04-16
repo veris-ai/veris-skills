@@ -479,8 +479,7 @@ This is the biggest decision for multi-agent systems:
 | **Bundle Kafka** | Only if event streaming is core to agent logic (e.g., agents react to event streams, not just request-response). Very heavy (~500MB+ with Zookeeper). |
 | **Bundle RabbitMQ** | If message routing/acknowledgment matters. Lighter than Kafka (~150MB). |
 | **Bundle Redis pub/sub** | If the queue is just for async task dispatch. Lightest option. |
-| **Replace with direct HTTP** | If the queue is used as a simple job queue between known services. Modify agent code to call HTTP endpoints directly. |
-| **External endpoint** | If bundling is too heavy and code changes are too invasive. User provides a managed Kafka/NATS URL. |
+| **External endpoint** | If bundling is too heavy. User provides a managed Kafka/NATS URL and points the agent at it via env var. |
 
 If bundling Kafka, add to start.sh:
 
@@ -581,7 +580,7 @@ If the original stack uses RabbitMQ, it can be bundled (~150MB). For lighter alt
 |---|---|---|
 | RabbitMQ | Redis with `rq` or `celery[redis]` | Simpler, less robust routing |
 | Kafka | Redis Streams | Only works for simple pub/sub patterns |
-| SQS (AWS) | Redis with `rq` | Need code changes to swap SDK |
+| SQS (AWS) | Use real SQS via outbound egress, or keep SQS external with a managed endpoint | Don't patch the agent to swap SDKs — that diverges from how it runs in prod |
 
 **6. Skip monitoring and observability:**
 
@@ -729,7 +728,7 @@ Most frameworks expose an HTTP API. Check the framework's docs for:
 - The request/response JSON shape
 - Whether it streams (SSE) or returns a complete response
 
-If the framework does not expose a network API and instead runs as a one-shot CLI, use a function channel with a thin Python wrapper that shells out to the CLI.
+If the framework does not expose a network API and instead runs as a one-shot CLI, this is a platform gap, not a wrapper opportunity. Surface it to the user — the agent's production deployment model probably involves something driving that CLI (cron, a job runner, a shell script), and we want the simulation to drive it the same way, not via a Python adapter that fakes a callable. Do not create a wrapper Python file to paper over this.
 
 **4. Handle framework-specific config:**
 

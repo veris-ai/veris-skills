@@ -1,6 +1,6 @@
 ---
 name: agent-integration
-description: Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, any needed startup wrappers, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.
+description: Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.
 ---
 
 Integrate this agent repo with Veris from scratch: $ARGUMENTS
@@ -8,6 +8,19 @@ Integrate this agent repo with Veris from scratch: $ARGUMENTS
 This skill takes a repo from "plain customer agent source" to "Veris-ready and pushable."
 
 Treat any existing `.veris/` files or old scaffold output as starting material only. Use the current bundled references in this skill as the source of truth for what you generate.
+
+## Core framing: the agent is the constant, Veris is the test harness
+
+Veris exists to test an agent under realistic conditions. The agent is the thing being tested; Veris is the harness around it. That asymmetry drives every decision in this skill:
+
+- **The agent runs the same way in Veris as it does in production.** If the agent speaks HTTP to a Slack Web API in prod, it speaks HTTP to the Veris Slack mock in sim. If it shells out to a CLI in prod, it shells out in sim. No special simulation code path.
+- **All integration work lives in `.veris/`.** `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/config.yaml`, `.veris/.dockerignore` are the deployment descriptor — the equivalent of a Helm chart or `docker-compose.yaml` for this agent. They describe *how to stand the agent up for this environment*. They do not contain behavior that belongs inside the agent.
+- **Do not write wrappers, shims, or glue code that "adapts" the agent to Veris.** A Python file that wraps a CLI agent to expose a callable, a script that translates Veris's actor format into the agent's native format, a patched version of the agent that accepts Veris-specific parameters — all of these are the wrong shape. They mean the thing you end up testing is not the agent.
+- **Do not modify the agent's source code to make it work in Veris.** If the agent assumes something Veris can't satisfy as-is, that's either a Veris platform gap to be logged, or a real issue with the agent that would also break production. Either way, the fix does not belong in the agent's source.
+- **If you find yourself needing a wrapper, stop and treat it as a finding.** Ask: what is the agent's real production integration path? If the agent has an HTTP server in prod, use that. If it's CLI-only in prod and Veris's actor can't drive a CLI, escalate — that's a Veris capability gap, not a license to invent glue.
+- **The one legitimate `.veris/` file that is not pure config is a container-orchestration `start.sh`** for bundling multiple processes (e.g., a database alongside the agent). Even that starts and runs the agent as-shipped; it does not transform its behavior.
+
+When in doubt: the agent's author should be able to read `.veris/` and recognize it as "the deploy config for Veris," not as "someone forked and patched my agent."
 
 ## Core rules
 
@@ -17,6 +30,7 @@ Treat any existing `.veris/` files or old scaffold output as starting material o
 - Do not silently preserve stale Veris config. Migrate it to the current preferred shape.
 - Do not generate `.env.simulation`. The current runtime flow is `agent.environment` plus `veris env vars set`.
 - Prefer the current `actor.channels` schema and canonical service names. Do not generate legacy `persona.modality`, `email_address`, or old service aliases unless the user explicitly asks for compatibility.
+- Do not write Python wrappers, shell shims, or any "adapter" code that translates between Veris and the agent. Use the agent's real production interface. If that isn't possible as-is, surface it as a platform gap, not as a wrapper opportunity.
 - Ask before external or irreversible actions:
   - installing `veris-cli`
   - running `veris login`
@@ -217,14 +231,12 @@ Look for four classes of interfaces:
 - Polling or webhook flow
 
 **Function**
-- A clean Python callable or command-line entry that accepts a user request and returns a response
-- Existing `handle_message`-style functions
-- Places where a thin wrapper file could expose a callable with minimal code changes
+- A clean Python callable the agent *already exposes* as part of its public API
+- Existing `handle_message`-style functions the agent's own documentation treats as an entry point
 
-If both network and function modes are viable, prefer the repo’s real product interface unless:
-- the agent is clearly one-shot/stateless
-- a function channel would be substantially simpler
-- the user agrees to that integration mode
+Do not invent a function interface by wrapping a CLI or a server. If the agent is CLI-only in production, the integration is CLI-driven — surface that and find the right Veris channel for it, or log it as a platform gap. A function channel is only correct when the repo already ships a callable as its primary or documented interface.
+
+If both network and function modes are viable, use the repo's real product interface. That is what runs in production; that is what we test.
 
 Tell the user exactly what you found and confirm the likely best integration path before continuing.
 
@@ -319,8 +331,8 @@ Pick one of:
 ### 3.2 Function-channel rules
 
 If you choose a function channel:
-- The callable path must be explicit and importable/launchable
-- If the repo does not already expose one cleanly, create the thinnest possible wrapper file
+- The callable path must be something the agent repo already exposes as a public interface (documented, referenced in its README, or otherwise part of its contract)
+- Do not create a wrapper file to conjure a callable out of a CLI or server — if the repo doesn't already expose one, function is the wrong channel
 - Omit `agent.entry_point` and `agent.port` in `veris.yaml`
 - If the callable is one-shot and stateless, set `actor.config.MAX_TURNS: 1`
 
@@ -337,16 +349,18 @@ If you choose HTTP / WS / email:
 Determine:
 - what gets copied into `/agent`
 - which files should stay out of the image
-- whether a `start.sh` or wrapper file is required
-- which code changes are truly necessary
+- whether a `start.sh` is required to bundle multiple processes (this is container orchestration, not agent modification)
+
+Do not plan "which code changes are necessary." The target is zero code changes to the agent. If an env-var override isn't enough and the agent genuinely can't run as-shipped, that's a finding — escalate it rather than patching the source.
 
 ### Checkpoint
 
 Explain:
-- how the actor will communicate with the agent
-- how the agent will start inside the container
+- how the actor will communicate with the agent (using the agent's real production interface)
+- how the agent will start inside the container (its real production start command)
 - what files will be copied
-- what code changes are needed, if any
+
+If you believe *any* agent-side code change is needed, flag it here and stop. The default answer is zero code changes. If you can't see a way forward without one, it's probably a Veris platform gap, not an integration step.
 
 Wait for approval before proceeding.
 
@@ -425,17 +439,24 @@ FROM ${GVISOR_BASE}
 ### 5.3 Supporting files
 
 Create only what is needed:
-- `start.sh` for bundled services or multi-process startup
-- thin function wrapper module if a callable integration needs one
-- minimal code patches for env-var overrides or startup behavior
+- `start.sh` for bundling multiple processes (e.g., a database alongside the agent) — this is container orchestration, same as a `docker-compose.yaml` would be
 - `.veris/.dockerignore` updates if the repo has large directories the default ignore file misses
 
-### 5.4 Code-change rules
+Do not create Python "wrapper modules" that expose the agent as a callable, translate Veris actor calls into the agent's native format, or otherwise insert themselves between the actor and the agent. Use the agent's real interface.
 
-- Keep changes minimal and local
-- Prefer env overrides over code edits
-- Explain each code change before making it
-- Do not refactor unrelated code
+### 5.4 No code changes to the agent
+
+The agent runs in Veris exactly as it runs in production. That means:
+- No source-code patches to accommodate simulation
+- No "simulation mode" flags or Veris-specific branches
+- No forked copies of the agent with local modifications
+
+If you find yourself wanting to change the agent's source, stop. Either:
+- The change can be expressed as an env-var override (then do it that way, via `agent.environment` or `veris env vars set`), or
+- The change is a real issue in the agent (then it's the customer's responsibility to fix, and it would also affect production), or
+- Veris can't accommodate the agent as-shipped (then it's a platform gap — escalate)
+
+Unrelated refactors are obviously out.
 
 Proceed directly to Phase 6 once the files are in place.
 
@@ -571,7 +592,7 @@ If `veris env create` scaffolds old-looking placeholders, overwrite them with th
 
 ### Keep the skill honest about function channels
 
-Use a function channel only when it is truly the right fit. Do not force a networked product into a function callable just because it seems simpler.
+Use a function channel only when the agent already exposes a callable as part of its public interface. Do not force a networked product into a function callable just because it seems simpler, and never create a wrapper file to invent a callable the agent doesn't already have.
 
 ### Keep the skill honest about one-shot agents
 
