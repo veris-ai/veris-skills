@@ -661,6 +661,88 @@ Is it infrastructure tooling?
 
 ---
 
+## Pattern 8: Platform-Hosted Agent (Framework-as-Runtime)
+
+**Typical setup:** The repo contains configuration files, prompt templates, and tool definitions but not a standalone application. The agent runs on an installed framework CLI or server: LangServe, CrewAI, AutoGen, Dify, n8n, Flowise, or similar.
+
+**Characteristics:** No `main.py` / `index.js` / application entrypoint. The "source code" is YAML/JSON config, prompt files, and possibly a few small Python/JS files that define tools or hooks. The framework is the runtime.
+
+### How to identify
+
+- The repo has no traditional app entrypoint (`app.py`, `main.py`, `server.js`, `index.ts`)
+- The primary files are configuration: `crew.yaml`, `agents.yaml`, `flows.json`, `docker-compose.yml` that just runs a framework image
+- `pyproject.toml` or `package.json` lists the framework as a dependency but there is no substantial application code
+- The README says "install [framework], then run [framework CLI command]"
+
+### Restructuring steps
+
+**1. Install the framework in the Dockerfile:**
+
+The framework is installed from a package manager, not built from source:
+
+```dockerfile
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
+
+# Install the framework
+RUN pip install crewai    # or: npm install -g langserve, etc.
+
+# Copy config and tool definitions
+COPY . /agent/
+
+WORKDIR /app
+```
+
+If the repo has a `pyproject.toml` or `requirements.txt` that lists the framework plus tool dependencies, install from that:
+
+```dockerfile
+COPY requirements.txt /agent/
+WORKDIR /agent
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . /agent/
+WORKDIR /app
+```
+
+**2. Determine the entry point:**
+
+The entry point is the framework's CLI or server command:
+
+```yaml
+# veris.yaml
+agent:
+  entry_point: crewai run         # or: langserve start, etc.
+  port: 8080
+  code_path: /agent
+```
+
+Check the framework's docs or the repo's README for the canonical start command. Common patterns:
+- CrewAI: `crewai run` or `python -m crewai run`
+- LangServe: `langchain serve --port 8080`
+- Dify: container with built-in server
+- n8n: `n8n start`
+
+**3. Determine the channel interface:**
+
+Most frameworks expose an HTTP API. Check the framework's docs for:
+- The chat/invoke endpoint path
+- The request/response JSON shape
+- Whether it streams (SSE) or returns a complete response
+
+If the framework does not expose a network API and instead runs as a one-shot CLI, use a function channel with a thin Python wrapper that shells out to the CLI.
+
+**4. Handle framework-specific config:**
+
+- Environment variables the framework reads (API keys, model names, etc.)
+- Config file paths the framework expects (may need to be at a specific location)
+- Tool/plugin registrations that reference local files
+
+**5. Watch for source-tree compile errors:**
+
+Platform-hosted repos sometimes have Python files with syntax errors or import failures because the developer only ever ran them through the framework (which may not import all files). If `pip install -e .` or the build fails due to bad source files, install the framework and config from published packages and `COPY` only the config files — do not install the repo as an editable package.
+
+---
+
 ## Common Rules Across All Patterns
 
 These apply regardless of which pattern the agent matches.

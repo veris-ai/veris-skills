@@ -13,13 +13,13 @@ FROM ${GVISOR_BASE}
 
 The current base image already includes:
 - Python 3.12
-- `uv`
-- Node.js
+- `uv` (latest at image build time)
+- Node.js 18.x (LTS) with npm
 - nginx
-- PostgreSQL
+- PostgreSQL 15
 - Veris infrastructure and mock services
 
-Do not re-install Node.js unless the repo specifically requires a different version.
+If the agent requires a newer Node.js or Python, see the "Runtime version override" section below. Do not re-install these runtimes unless the repo specifically requires a different version.
 
 ## Template 1: Python agent with `uv`
 
@@ -119,6 +119,77 @@ RUN chmod +x /agent/start.sh
 
 WORKDIR /app
 ```
+
+## Template 7: Platform-hosted agent (framework-as-runtime)
+
+```dockerfile
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
+
+# Install the framework from a package manager
+RUN pip install crewai    # or: npm install -g @langchain/langserve
+
+# Copy config files and tool definitions (not a full application)
+COPY . /agent/
+
+WORKDIR /app
+```
+
+If the repo has a dependency manifest that includes the framework:
+
+```dockerfile
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
+
+COPY requirements.txt /agent/
+WORKDIR /agent
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . /agent/
+
+WORKDIR /app
+```
+
+Use this when the repo is primarily config files and the runtime is a globally-installed framework. See Pattern 8 in `reference/infrastructure-patterns.md`.
+
+## Runtime version override
+
+The base image ships with **Python 3.12** and **Node.js 18.x**. If the agent requires a newer version:
+
+**Node.js version upgrade:**
+
+```dockerfile
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
+
+ARG NODE_VERSION=22.14.0
+RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz \
+    | tar -xJ -C /usr/local --strip-components=1 --no-same-owner \
+ && node --version
+
+# ... rest of agent setup
+```
+
+**Python version upgrade (via deadsnakes PPA on Debian-based images):**
+
+```dockerfile
+ARG GVISOR_BASE
+FROM ${GVISOR_BASE}
+
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python3.13 python3.13-venv python3.13-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3.13 -m venv /agent/.venv
+ENV PATH="/agent/.venv/bin:$PATH"
+
+# ... rest of agent setup (pip install, COPY, etc.)
+```
+
+Only override runtimes when the agent genuinely requires a newer version. The base image versions work for the majority of agents.
 
 ## Rules
 

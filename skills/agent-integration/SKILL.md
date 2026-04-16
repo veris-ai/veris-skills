@@ -24,6 +24,16 @@ Treat any existing `.veris/` files or old scaffold output as starting material o
   - setting environment variables with `veris env vars set`
   - pushing with `veris env push`
 
+### Fast-track mode
+
+If the user says "go all the way", "do everything", or otherwise pre-approves the full flow:
+
+- Skip intermediate checkpoints (end-of-Phase 2, end-of-Phase 3, end-of-Phase 4)
+- Still explain decisions inline as you make them, so the user can follow along
+- Still stop and ask before truly irreversible or external actions: `veris env create`, `veris env push`, `veris env vars set` with real secrets
+- If a decision has genuinely ambiguous tradeoffs (e.g., bundle-vs-external for a heavy service), pause and ask even in fast-track mode
+- At the end, present a consolidated summary of all decisions made
+
 ## Read these files when needed
 
 - For current service names and detection: [reference/service-mapping.md](reference/service-mapping.md)
@@ -48,11 +58,12 @@ Treat any existing `.veris/` files or old scaffold output as starting material o
 | 4 | Generate `.veris/veris.yaml` |
 | 5 | Generate `.veris/Dockerfile.sandbox` and supporting files |
 | 6 | Configure runtime env vars, validate, and push |
+| 7 | Smoke-validate with a single scenario + simulation |
 
 ---
 
 ## Phase 0: Bootstrap Veris Tooling And Environment
-[Phase 0/6]
+[Phase 0/7]
 
 Tell the user: "I'm going to make sure this repo has the Veris tooling and environment wiring needed for the rest of the integration work."
 
@@ -110,7 +121,7 @@ Proceed directly to Phase 1.
 ---
 
 ## Phase 1: Discover The Repo And Current Runtime
-[Phase 1/6]
+[Phase 1/7]
 
 Tell the user: "I'm going to inventory how this repo currently runs, what it depends on, and how users interact with it."
 
@@ -168,6 +179,22 @@ Find the actual code path that handles incoming user work:
 - request routing
 - any background worker or webhook listener that matters during a user conversation
 
+### 1.5a Platform-hosted agents (config-only repos)
+
+If the repo has no traditional application entrypoint — no `main.py`, `app.py`, `server.js`, `index.ts` — check whether it is a **platform-hosted agent**: a repo of config files that runs on an installed framework (CrewAI, LangServe, AutoGen, Dify, n8n, Flowise, or similar).
+
+Signs:
+- Primary files are YAML/JSON config, prompt templates, and tool definitions
+- `pyproject.toml` or `package.json` lists a framework as the main dependency
+- No substantial application logic beyond small tool/hook files
+- README instructions say "install [framework], then run [framework command]"
+
+If this is the case:
+- The framework is the runtime — it will be installed in the Dockerfile, not built from source
+- The entry point is the framework's CLI or server command
+- See Pattern 8 in `reference/infrastructure-patterns.md` for the full restructuring approach
+- Watch for source-tree compile errors if you attempt `pip install .` on these repos
+
 ### 1.6 Determine the integration interface
 
 This is critical. Determine how the simulated actor should talk to the agent.
@@ -206,7 +233,7 @@ Proceed to Phase 2.
 ---
 
 ## Phase 2: Analyze Dependencies And Service Strategy
-[Phase 2/6]
+[Phase 2/7]
 
 Tell the user: "I'm now classifying each dependency into mock, bundle, external, or skip."
 
@@ -222,6 +249,7 @@ For every dependency, classify it as one of:
 3. **Use an external endpoint**
 4. **Skip entirely**
 5. **Needs discussion**
+6. **Allow real egress** — the agent must reach the real internet (e.g., web search, URL scraping, live API with no mock). Results will be nondeterministic across simulation runs.
 
 ### Classification rules
 
@@ -247,6 +275,18 @@ For every dependency, classify it as one of:
 **Auth helpers**
 - Google/Microsoft/Atlassian/Intuit auth helpers are platform-level helpers, not services you should normally add manually
 
+**Web search and scraping**
+- If the agent calls search APIs (Google, Bing, SerpAPI, Tavily, Brave Search, DuckDuckGo) or fetches live URLs, these cannot be mocked
+- Classify as "Allow real egress"
+- Warn the user: live internet calls make simulation results nondeterministic — the same scenario may produce different outputs on different runs
+- If the search is truly optional (e.g., a fallback when the knowledge base has no answer), consider disabling it via env var for deterministic simulations
+
+**Real internet egress (general)**
+- Some agents need to hit arbitrary external endpoints that Veris cannot mock (webhooks to third-party services, real-time data feeds, public REST APIs without a Veris service)
+- These also classify as "Allow real egress"
+- The Veris container allows outbound internet by default for non-intercepted domains
+- Surface the nondeterminism tradeoff to the user
+
 ### Checkpoint
 
 Walk through your dependency analysis with the user before moving on. The user should understand:
@@ -261,7 +301,7 @@ Wait for approval before proceeding.
 ---
 
 ## Phase 3: Choose Integration Mode And Container Architecture
-[Phase 3/6]
+[Phase 3/7]
 
 Tell the user: "I'm locking down how this agent will run inside the Veris container and how the actor will talk to it."
 
@@ -313,7 +353,7 @@ Wait for approval before proceeding.
 ---
 
 ## Phase 4: Generate `.veris/veris.yaml`
-[Phase 4/6]
+[Phase 4/7]
 
 Tell the user: "I'm generating the final Veris configuration in the current preferred schema."
 
@@ -353,7 +393,7 @@ Show the complete `veris.yaml`, explain the sections, and get approval before wr
 ---
 
 ## Phase 5: Generate `.veris/Dockerfile.sandbox` And Supporting Files
-[Phase 5/6]
+[Phase 5/7]
 
 Tell the user: "I'm generating the image build and any small support files needed for this integration."
 
@@ -402,7 +442,7 @@ Proceed directly to Phase 6 once the files are in place.
 ---
 
 ## Phase 6: Configure Runtime Env Vars, Validate, And Push
-[Phase 6/6]
+[Phase 6/7]
 
 Tell the user: "I'm turning this into a pushable Veris environment."
 
@@ -469,6 +509,55 @@ Summarize:
 Then suggest the next commands:
 - `veris scenarios create`
 - `veris simulations create`
+
+---
+
+## Phase 7: Smoke Validation
+[Phase 7/7]
+
+Tell the user: "I'm going to run a single scenario and simulation to verify the integration works end-to-end."
+
+### 7.1 Create a smoke scenario
+
+```bash
+veris scenarios create --num 1
+```
+
+The goal is a single short interaction that exercises the agent's primary interface.
+
+### 7.2 Run a single simulation
+
+```bash
+veris simulations create --scenario-set-id <id>
+```
+
+Wait for it to complete.
+
+### 7.3 Check the results
+
+Review the simulation for:
+
+1. **Agent responded with real content** — not an error page, empty body, or exception traceback
+2. **Mock services were called** — if the agent should call Slack, Salesforce, etc., confirm those calls appear
+3. **No startup crashes** — the agent process stayed alive for the duration
+4. **Channel contract is correct** — the actor's messages reached the agent and responses came back in the expected shape
+
+### 7.4 Diagnose failures
+
+If the smoke test fails:
+- Check agent container logs for startup errors or missing env vars
+- Verify `actor.channels` request/response mapping matches the actual API shape
+- Confirm mock service credentials and DNS aliases are correct
+- Return to the relevant phase to fix and re-push
+
+### 7.5 Sign off
+
+If the smoke test passes, summarize:
+- What the actor sent and what the agent responded
+- Which services were exercised
+- Confidence level that the integration is ready for full scenario generation
+
+Then suggest full scenario generation (`veris scenarios create --num N`) and simulation as the next step.
 
 ---
 

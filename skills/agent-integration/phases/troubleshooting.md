@@ -110,6 +110,37 @@ docker build -f .veris/Dockerfile.sandbox .
 
 from the repo root.
 
+## Build fails due to source-tree compile errors
+
+If `pip install -e .` or `pip install .` fails because the repo's own source files have syntax errors, broken imports, or missing type stubs:
+
+1. Check whether the repo is a **platform-hosted agent** (config-only, framework-as-runtime). If so, do not install the repo as an editable package.
+2. Instead, install the framework and its dependencies from published packages:
+   ```dockerfile
+   RUN pip install crewai langchain-openai  # framework + plugins
+   ```
+3. COPY only the config/prompt/tool files the framework needs — not the entire source tree as an installable package.
+4. If the repo does contain real application code that must be installed, try `pip install --no-build-isolation .` or fix the specific compile errors. Common causes: missing `build-system` in `pyproject.toml`, Cython extensions without a C compiler, or Python version mismatch.
+
+## `veris env create` scaffold produces broken config
+
+If `veris env create` succeeds but reports a non-fatal config upload error (typically a 422 on the `services` list), the scaffolded `veris.yaml` has fields the backend does not accept.
+
+This is expected — the scaffolded config is a placeholder with commented-out examples. Fix it:
+
+1. Regenerate `.veris/veris.yaml` using the current preferred shape from `reference/veris-yaml-schema.md`
+2. Ensure `services:` is a valid YAML list (not commented-out blocks that parse as an empty mapping)
+3. Re-push with `veris env push`
+
+## Base image runtime version too old for agent
+
+If the agent requires a newer Python or Node.js than the base image provides:
+
+1. Check the agent's dependency manifests for explicit version constraints (`python_requires >= "3.13"`, `engines.node >= "20"`)
+2. Add a runtime version override to `Dockerfile.sandbox` — see the "Runtime version override" section in `templates/dockerfile-sandbox.md`
+3. For Python, install the newer version alongside the base and create a dedicated virtualenv
+4. For Node.js, overlay the newer binary and it will replace the base version on PATH
+
 ## Runtime env vars are missing
 
 Common causes:
