@@ -135,6 +135,38 @@ Function-channel rules:
 - Keep `agent.code_path`
 - Use `MAX_TURNS: "1"` when the callable is one-shot/stateless
 
+#### Function callable contract
+
+The callable specified in `actor.channels[].callable` must follow this signature:
+
+**Python (module:function notation):**
+
+```python
+def handle_message(message: str, session_id: str = "", **kwargs) -> str:
+    """
+    Args:
+        message:    The actor's message text.
+        session_id: A unique identifier for the simulation conversation.
+                    Use to maintain state across turns if needed.
+        **kwargs:   Reserved for future expansion. Accept and ignore
+                    unknown keys.
+
+    Returns:
+        The agent's response as a plain string.
+    """
+    ...
+```
+
+The callable path uses `module.path:function_name` notation (e.g., `app.handlers:handle_message`). The module must be importable from `agent.code_path`.
+
+**Key rules:**
+- The function is called once per actor turn
+- `message` and `session_id` are always provided as keyword arguments
+- Return a plain string (the actor receives it as the agent's reply)
+- Raise an exception to signal failure; the simulation will log the error
+- If the callable needs setup (DB connections, model loading), do it lazily on first call or in module-level init
+- For one-shot/stateless callables, set `actor.config.MAX_TURNS: "1"`
+
 ## SSE responses
 
 ```yaml

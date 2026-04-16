@@ -37,6 +37,17 @@ Use this file when deciding what to put in `services:` and when migrating stale 
 | Google Docs | `google/docs` | docs scopes, `docs.googleapis.com` |
 | Zillow / Bridge | `zillow` | `api.bridgedataoutput.com`, real-estate MLS APIs |
 
+## Protocol and transport limitations
+
+Some services support multiple protocol variants in production. The Veris mock may only support one. When integrating, confirm the agent uses the supported variant.
+
+| Service | Supported protocol | Not supported | Migration notes |
+| --- | --- | --- | --- |
+| Slack | HTTP Events API (Web API calls over HTTPS) | Socket Mode (WebSocket via `SLACK_APP_TOKEN`) | Reconfigure the agent to HTTP mode. Set `SLACK_SIGNING_SECRET` instead of `SLACK_APP_TOKEN`. Handler code typically needs only minor changes (switch `SocketModeHandler` to HTTP adapter). |
+| Twilio | REST API (HTTP) | WebSocket media streams | Agents processing real-time voice via Twilio WS streams cannot use the mock. Keep Twilio external or use a function channel to bypass the voice path. |
+
+**General rule:** If a service has multiple transport modes (HTTP vs WebSocket, polling vs streaming, REST vs GraphQL), check which one the Veris mock implements. When the agent uses an unsupported mode, either reconfigure the agent to use the supported mode or classify the dependency as "external."
+
 ## Legacy aliases to migrate away from
 
 | Old alias | Current canonical name |
