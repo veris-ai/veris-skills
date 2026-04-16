@@ -148,8 +148,10 @@ Common causes:
 1. Secret was never set with `veris env vars set`
 2. The value belongs in `agent.environment` but is missing there
 3. The user expected `.env.simulation`, which is no longer the preferred flow
+4. Secret was set via shell interpolation (`veris env vars set KEY="$VAR" --secret`) but `$VAR` was empty or unset — the CLI saved an empty string with no error
 
 Fix:
 - use `veris env vars set` for secrets and per-env overrides
 - use `agent.environment` for stable non-secret defaults
 - optionally mirror local values in a root `.env` for local-only smoke tests
+- if a secret might have been set empty, verify with `printenv VAR` before setting, or re-set it with a literal value
