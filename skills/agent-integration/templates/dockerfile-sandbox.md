@@ -199,5 +199,5 @@ Only override runtimes when the agent genuinely requires a newer version. The ba
 - End with `WORKDIR /app`
 - Do not copy `.veris/veris.yaml` into the image
 - Do not assume `.veris/` is the build context
-- If you add `start.sh` or a wrapper file, copy it into `/agent`
+- If you add a `start.sh` to bundle multiple processes (e.g., database alongside agent), copy it into `/agent`. Do not write agent-adapter wrappers — see SKILL.md core framing.
 - If the repo needs schemas, migrations, prompt assets, or static files at runtime, copy those explicitly
