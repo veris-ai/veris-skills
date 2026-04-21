@@ -1,45 +1,29 @@
 # veris-skills
 
-A skill for coding agents that integrates a raw customer agent repo with the [Veris AI](https://veris.ai) simulation platform end-to-end.
+Skills for coding agents that use the [Veris AI](https://veris.ai) simulation platform.
 
-Works with **Claude Code**, **OpenAI Codex CLI**, and **Cursor**.
+## Skills
 
-## What it does
+| Skill | What it does |
+| --- | --- |
+| [`agent-integration`](skills/agent-integration) | Integrate a raw customer agent repo with Veris end-to-end: `.veris/veris.yaml`, `Dockerfile.sandbox`, env vars, and `veris env push`. |
 
-`/agent-integration` takes a repo from "plain customer agent source" to "Veris-ready and pushable":
-
-- Installs or verifies `veris-cli`, logs in, and creates or reuses a Veris environment
-- Analyzes the repo to pick the right integration channel (HTTP, WebSocket, email, or function)
-- Generates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, and supporting files
-- Configures runtime env vars and can finish with `veris env push`
-- Refreshes stale `.veris/` integrations to current conventions
+More coming soon (scenario creation, running simulations, …).
 
 ## Install
 
-### One-liner (autodetects your coding agent)
+Works across Claude Code, OpenAI Codex CLI, Cursor, and 40+ other coding agents via the [`skills`](https://github.com/vercel-labs/skills) CLI. It autodetects which agents you have installed and places files in the right location for each.
+
+Browse and install skills from this repo:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/veris-ai/veris-skills/main/install.sh | bash
+npx skills add veris-ai/veris-skills
 ```
 
-Force a specific target (or install for all):
+Install a specific skill directly:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/veris-ai/veris-skills/main/install.sh | bash -s -- --target claude
-curl -sSL https://raw.githubusercontent.com/veris-ai/veris-skills/main/install.sh | bash -s -- --target all
-```
-
-### Manual (one `git clone` per harness)
-
-```bash
-# Claude Code
-git clone https://github.com/veris-ai/veris-skills ~/.claude/skills/agent-integration
-
-# OpenAI Codex CLI
-git clone https://github.com/veris-ai/veris-skills ~/.codex/skills/agent-integration
-
-# Cursor
-git clone https://github.com/veris-ai/veris-skills ~/.cursor/skills/agent-integration
+npx skills add veris-ai/veris-skills/skills/agent-integration
 ```
 
 ## Use
