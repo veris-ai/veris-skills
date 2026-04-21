@@ -1,40 +1,59 @@
-# Veris Skills
+# veris-skills
 
-A collection of skills for coding agents that take advantage of the [Veris AI](https://veris.ai) simulation platform.
+A skill for coding agents that integrates a raw customer agent repo with the [Veris AI](https://veris.ai) simulation platform end-to-end.
 
-## Installation
+Works with **Claude Code**, **OpenAI Codex CLI**, and **Cursor**.
 
-Add skills to your Claude Code configuration:
+## What it does
+
+`/agent-integration` takes a repo from "plain customer agent source" to "Veris-ready and pushable":
+
+- Installs or verifies `veris-cli`, logs in, and creates or reuses a Veris environment
+- Analyzes the repo to pick the right integration channel (HTTP, WebSocket, email, or function)
+- Generates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, and supporting files
+- Configures runtime env vars and can finish with `veris env push`
+- Refreshes stale `.veris/` integrations to current conventions
+
+## Install
+
+### One-liner (autodetects your coding agent)
 
 ```bash
-git clone git@github.com:veris-ai/veris-skills.git ~/.claude/skills/veris-skills
+curl -sSL https://raw.githubusercontent.com/veris-ai/veris-skills/main/install.sh | bash
 ```
 
-## Available Skills
+Force a specific target (or install for all):
 
-### `/agent-integration`
+```bash
+curl -sSL https://raw.githubusercontent.com/veris-ai/veris-skills/main/install.sh | bash -s -- --target claude
+curl -sSL https://raw.githubusercontent.com/veris-ai/veris-skills/main/install.sh | bash -s -- --target all
+```
 
-Integrate a raw customer agent repo with Veris from scratch. Handles CLI/bootstrap, `.veris/` scaffolding, `veris.yaml`, `Dockerfile.sandbox`, runtime env vars, and can finish with `veris env push`.
+### Manual (one `git clone` per harness)
 
-- Starts from repos with no Veris setup at all
-- Refreshes stale `.veris/` integrations to current conventions
-- Supports HTTP, WebSocket, email, and function-channel integrations
-- Carries through to an actual `veris env push`
+```bash
+# Claude Code
+git clone https://github.com/veris-ai/veris-skills ~/.claude/skills/agent-integration
+
+# OpenAI Codex CLI
+git clone https://github.com/veris-ai/veris-skills ~/.codex/skills/agent-integration
+
+# Cursor
+git clone https://github.com/veris-ai/veris-skills ~/.cursor/skills/agent-integration
+```
+
+## Use
+
+From inside any agent repo:
+
+```
+/agent-integration
+```
+
+Or point at a different repo:
 
 ```
 /agent-integration path/to/agent/repo
-```
-
-### `/grader-generator`
-
-Generate failure-mode graders for evaluating AI agents. Given an agent's source code, creates a comprehensive multi-layer grader with atomic checks organized by category.
-
-- Analyzes agent capabilities, tools, and business rules
-- Creates atomic checks that test ONE failure mode each
-- Outputs for Veris platform and OpenAI Evals API
-
-```
-/grader-generator path/to/agent/source
 ```
 
 ## License

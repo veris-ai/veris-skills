@@ -3,9 +3,9 @@ name: agent-integration
 description: Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.
 ---
 
-Integrate this agent repo with Veris from scratch: $ARGUMENTS
+Integrate this agent repo with Veris from scratch.
 
-This skill takes a repo from "plain customer agent source" to "Veris-ready and pushable."
+This skill takes a repo from "plain customer agent source" to "Veris-ready and pushable." If the user provided a path to an agent repo, use that as the repo root. Otherwise use the current working directory.
 
 Treat any existing `.veris/` files or old scaffold output as starting material only. Use the current bundled references in this skill as the source of truth for what you generate.
 
@@ -80,8 +80,6 @@ If the user says "go all the way", "do everything", or otherwise pre-approves th
 [Phase 0/7]
 
 Tell the user: "I'm going to make sure this repo has the Veris tooling and environment wiring needed for the rest of the integration work."
-
-If `$ARGUMENTS` includes a path, use that as the repo root. Otherwise use the current working directory.
 
 ### 0.1 Verify repo root
 
