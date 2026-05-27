@@ -85,11 +85,71 @@ Two patterns that work:
 
 If your simulation hangs after the agent's first reply (actor never sends a follow-up), missing silence is the first thing to check.
 
+### Pipecat WS transports need explicit end-of-turn silence
+
+Pipecat exposes a `TransportParams.audio_out_auto_silence` flag (defaults to `True`) that sounds like it does exactly the "always live mic" pump described above. **It is only honored by the WebRTC transports** — `SmallWebRTCTransport` and `DailyTransport`. The WebSocket transports — `WebsocketServerTransport` and `FastAPIWebsocketTransport` — ignore the flag and just stop sending bytes when the bot's audio queue drains. (Grep `audio_out_auto_silence` in the pipecat source to confirm; only the WebRTC transports reference it.)
+
+So a Pipecat agent that serves `voice_ws` directly — the "case 1 / no bridge needed" green path described below — still hits the deadlock unless you wire silence in yourself. The bot greets, the WS goes quiet, the actor's VAD never sees `speech_stopped`, and the call runs out the simulation clock.
+
+The fix is the end-of-turn-burst pattern from above, implemented as a Pipecat `FrameProcessor` inserted between the LLM and `transport.output()`:
+
+```python
+# app/processors.py
+from pipecat.frames.frames import Frame, OutputAudioRawFrame, TTSStoppedFrame
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+class TrailingSilenceProcessor(FrameProcessor):
+    """After every bot turn, emit ~1700 ms of PCM silence so the Veris actor's
+    VAD can commit end-of-speech."""
+
+    def __init__(self, *, sample_rate=24000, num_channels=1,
+                 silence_ms=1700, chunk_ms=20):
+        super().__init__()
+        samples_per_chunk = sample_rate * chunk_ms // 1000
+        self._chunk_bytes = samples_per_chunk * 2 * num_channels  # PCM16
+        self._n_chunks = silence_ms // chunk_ms
+        self._sample_rate = sample_rate
+        self._num_channels = num_channels
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        if isinstance(frame, TTSStoppedFrame) and direction == FrameDirection.DOWNSTREAM:
+            silence = b"\x00" * self._chunk_bytes
+            for _ in range(self._n_chunks):
+                await self.push_frame(
+                    OutputAudioRawFrame(
+                        audio=silence,
+                        sample_rate=self._sample_rate,
+                        num_channels=self._num_channels,
+                    ),
+                    direction,
+                )
+```
+
+Wire it into the pipeline only on the `voice_ws` path (the WebRTC browser path doesn't need it):
+
+```python
+Pipeline([
+    transport.input(),
+    user_aggregator,
+    llm,
+    TrailingSilenceProcessor(),   # WS path only
+    transport.output(),
+    assistant_aggregator,
+])
+```
+
+The one trap to watch for: key the burst off `TTSStoppedFrame`, **not** `BotStoppedSpeakingFrame`. `TTSStoppedFrame` is emitted by the LLM / TTS service and flows downstream through your processor; `BotStoppedSpeakingFrame` is emitted by the *output transport itself*, downstream of any processor sitting before it, so a processor wired in this position will never see it and will silently do nothing.
+
+The 1700 ms tail = 1500 ms (the actor's server-VAD silence window) + 200 ms safety. Tune the safety margin if you see late commits, but don't go below ~1600 ms.
+
 ## Choosing how the agent reaches `voice_ws`
 
 The actor will always speak whichever framing the channel is configured for. The agent has three options for matching it:
 
-1. **The framework natively speaks the configured framing.** Pipecat's `WebsocketServerTransport` configured with a `RawAudioFrameSerializer` matches `protocol: binary`. A bare OpenAI Realtime endpoint already speaks `protocol: json` (the envelope is OpenAI's own wire format). With the right transport plugin, the agent serves `voice_ws` directly — no bridge process, no extra container.
+1. **The framework natively speaks the configured framing.** Pipecat's `WebsocketServerTransport` configured with a `RawAudioFrameSerializer` matches `protocol: binary` (but see the [Pipecat WS transports note](#pipecat-ws-transports-need-explicit-end-of-turn-silence) above — you still need to add a silence-tail processor). A bare OpenAI Realtime endpoint already speaks `protocol: json` (the envelope is OpenAI's own wire format). With the right transport plugin, the agent serves `voice_ws` directly — no bridge process, no extra container.
 
 2. **The framework speaks a different transport.** LiveKit Agents (WebRTC end-to-end), agents wired to SIP/Twilio media streams, custom in-house frameworks with incompatible message envelopes — all need a small bridge process inside the sandbox container that translates between the actor's framing and the framework's native transport. See [Pattern 9: Transport bridge](infrastructure-patterns.md#pattern-9-transport-bridge) for the architecture.
 
