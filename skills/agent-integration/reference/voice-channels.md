@@ -150,6 +150,7 @@ The agent receives `{"type":"audio","audio":"<b64 PCM16>"}` messages from the ac
 - **WAV/RIFF headers.** Send raw PCM samples (or base64 of raw PCM in JSON mode), not a WAV file. If you're using a TTS that defaults to WAV, request `format: "pcm"` or `response_format: "pcm"`.
 - **Framing mismatch.** A binary WS message in `protocol: json` mode (or a text/JSON message in `protocol: binary` mode) is a protocol violation — the actor will disconnect. Make sure the agent's transport and the channel's `protocol` field agree.
 - **Missing silence between turns.** Covered above — the most common cause of "simulation hangs after the first turn."
+- **Tool-result payloads must serialize as strings, not dicts.** Voice tool platforms (ElevenLabs `client_tool_result.result`, OpenAI Realtime `function_call_output.output`, Vapi tool webhooks) each validate the result field against their own schema — most expect a string. Returning a `model_dump()` dict from a Pydantic model gets rejected by the orchestrator (ElevenLabs disconnects with `1008 policy violation: ClientToolResultClientToOrchestratorEvent`) and the sim hangs until timeout instead of failing loudly. Wrap with `json.dumps(result, default=str)` — the `default=str` covers enums and datetimes that aren't natively JSON-serializable.
 
 ## Not yet covered
 

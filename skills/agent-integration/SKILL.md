@@ -136,7 +136,9 @@ Inspect:
 If `.veris/` does not exist, or it exists but has no environment binding:
 1. Derive a candidate environment name from the repo directory.
 2. Show the user the proposed name.
-3. On approval, run `veris env create --name "<name>"`.
+3. On approval, run `veris env create --self-serve --name "<name>"`.
+
+`--self-serve` (`veris-cli >= 2.27.0`) is the right mode for this skill's audience: you are authoring `.veris/` yourself, and the env should land in `status=ready` so `veris env push` works immediately. Without it, `env create` defaults to managed-setup mode where the Veris team generates `Dockerfile.sandbox` + `veris.yaml` for the customer, and `veris env push` returns `409: Run veris env submit first` until that pipeline releases the env. If `veris env create --help` doesn't list `--self-serve`, bump the CLI first (`uv tool upgrade veris-cli`). For recovery from an env that was already created without `--self-serve`, see [phases/troubleshooting.md](phases/troubleshooting.md#veris-env-push-returns-409-managed-onboarding).
 
 Explain what `veris env create` gives them:
 - `.veris/veris.yaml` — Veris simulation config
