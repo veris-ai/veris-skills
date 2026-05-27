@@ -75,7 +75,6 @@ Use this when the container holds **multiple peer processes that all must be ali
 # Multi-process container with fail-fast — if any peer dies, take down
 # the rest so Veris restarts the container cleanly instead of leaving a
 # partially-working stack serving broken responses.
-set -e
 
 # Peer 1: in-container service the agent depends on (media server, SIP daemon, etc.)
 /usr/local/bin/some-server --bind 0.0.0.0 &
@@ -85,21 +84,31 @@ SVC_PID=$!
 sleep 1
 
 # Peer 2: agent worker (registers against the in-container service)
-cd /agent && uv run --no-sync python -m app.worker start &
+uv run --no-sync python -m app.worker start &
 WK_PID=$!
 
 # Peer 3: bridge / API on the actor's port — also a peer, not the "main"
-cd /agent && uv run --no-sync uvicorn app.bridge:app \
+uv run --no-sync uvicorn app.bridge:app \
     --host 0.0.0.0 --port "${PORT:-8080}" &
 BR_PID=$!
 
-# Block until any one of the peers exits. wait -n returns when the first
-# child exits; the trailing kill + exit 1 makes sure the container goes
-# down too, so Veris can restart it instead of half-serving requests.
+# Clean shutdown. wait -n returns when the first child exits; cleanup
+# kills the rest so the container exits as a unit and Veris restarts
+# it instead of half-serving requests. NOTE: we intentionally avoid
+# `set -e` here — with `set -e`, a non-zero exit from the first child
+# would terminate the shell before the explicit kill block runs,
+# leaving orphan peers behind.
+cleanup() {
+  kill "$SVC_PID" "$WK_PID" "$BR_PID" 2>/dev/null || true
+}
+trap 'cleanup; exit 143' TERM INT
+
 wait -n
-echo "[start] a peer process exited — shutting down siblings"
-kill "$SVC_PID" "$WK_PID" "$BR_PID" 2>/dev/null || true
-exit 1
+status=$?
+echo "[start] a peer process exited (status=$status) — shutting down siblings"
+cleanup
+wait || true
+exit "$status"
 ```
 
 When to prefer this over Templates 1-3:
@@ -109,13 +118,12 @@ When to prefer this over Templates 1-3:
 
 ## Rules
 
-- The LAST command must use `exec` (replaces shell process, receives signals correctly).
-- Background processes use `&`.
+- **Templates 1–3:** the LAST command must use `exec` (replaces shell process, receives signals correctly). Background processes use `&`. A background process failing leaves the container running — that's intentional when the dependency isn't on the response path.
+- **Template 4:** the foreground `exec` rule does **not** apply — all peer processes run as backgrounds, and a `trap` + `wait -n` + explicit `cleanup` brings the container down as a unit when any peer dies. Use this only when the silent-crash failure mode of Templates 1-3 is unacceptable.
 - Always wait for bundled services to be healthy before starting the agent.
-- `set -e` at the top: exit immediately on any error.
+- `set -e` at the top of Templates 1–3 is fine; **do not** combine `set -e` with the Template 4 `wait -n` pattern — a non-zero child exit will kill the shell before cleanup runs, leaving orphan peers.
 - Use `${PORT:-8080}` to respect veris port injection.
-- Never use supervisord in sandbox -- start.sh is simpler and sufficient.
+- Never use supervisord in sandbox — start.sh is simpler and sufficient.
 - Veris already starts `start.sh` from `agent.code_path`, so do not add a redundant `cd /agent` at the top.
 - If you must launch background work from a subdirectory, use an explicit absolute-path subshell like `(cd /agent/worker && python main.py) &`.
-- If the foreground process lives in a subdirectory, `cd` there immediately before the final `exec`.
-- If a background process fails, the container continues -- that's intentional for simulation.
+- If the foreground process lives in a subdirectory, `cd` there immediately before the final `exec` (Templates 1–3 only).

@@ -802,8 +802,8 @@ For a SIP-style bridge it's typically two processes (the SIP stack and the agent
 
 ```bash
 #!/bin/bash
-# .veris/start.sh — three peer processes
-set -e
+# .veris/start.sh — three peer processes with fail-fast
+# Intentionally no `set -e` here — see Template 4 for the rationale.
 
 # 1. Framework's media server
 /usr/local/bin/livekit-server --dev --bind 0.0.0.0 &
@@ -811,21 +811,28 @@ LK_PID=$!
 sleep 1
 
 # 2. Agent worker (registers against the in-container media server)
-cd /agent && uv run --no-sync python -m app.agent start &
+uv run --no-sync python -m app.agent start &
 AG_PID=$!
 
 # 3. Bridge — listens on the actor's port
-cd /agent && uv run --no-sync uvicorn app.bridge:app \
+uv run --no-sync uvicorn app.bridge:app \
     --host 0.0.0.0 --port "${PORT:-8080}" &
 BR_PID=$!
 
-# Fail-fast: if any peer dies, take down the rest so Veris restarts cleanly.
+cleanup() {
+  kill "$LK_PID" "$AG_PID" "$BR_PID" 2>/dev/null || true
+}
+trap 'cleanup; exit 143' TERM INT
+
+# Fail-fast: when any peer dies, take down the rest so Veris restarts cleanly.
 wait -n
-kill "$LK_PID" "$AG_PID" "$BR_PID" 2>/dev/null || true
-exit 1
+status=$?
+cleanup
+wait || true
+exit "$status"
 ```
 
-See [start-sh.md Template 4](../templates/start-sh.md#template-4-peer-processes-with-fail-fast) for the rationale around `wait -n`.
+See [start-sh.md Template 4](../templates/start-sh.md#template-4-peer-processes-with-fail-fast) for the rationale around `wait -n` and why this shape avoids `set -e`.
 
 **5. Pull the framework's binary into the image.** For LiveKit, the cleanest path is a multi-stage Dockerfile that copies the prebuilt static binary from the official image:
 
