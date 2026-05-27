@@ -23,8 +23,10 @@ pip install veris-cli
 The repo is missing `.veris/config.yaml` with an environment binding. Run:
 
 ```bash
-veris env create --name "<env-name>"
+veris env create --self-serve --name "<env-name>"
 ```
+
+Use `--self-serve` for this skill's flow; plain `veris env create` can place the env in managed onboarding and block `veris env push` with a 409.
 
 ### Auth problems
 
@@ -139,7 +141,7 @@ If `veris env push` returns `[409] Run veris env submit first to complete manage
 For this skill's audience (self-authoring `.veris/`), `--self-serve` at create time is the right fix. Three recovery paths in increasing order of effort:
 
 1. **You forgot `--self-serve`:** `veris env delete <env-id>`, then `veris env create --self-serve --name <name>`. Re-set any `veris env vars set` values on the new env, and update `.veris/config.yaml` if the env id changed.
-2. **Your CLI doesn't show `--self-serve`:** the flag was added in veris-cli 2.27.0 (#164). Upgrade (`uv tool upgrade veris-cli`), then take path 1.
+2. **Your CLI doesn't show `--self-serve`:** the flag was added in veris-cli 2.27.0 (#164). Upgrade using the install manager that owns `veris` (`uv tool upgrade veris-cli` or `pip install -U veris-cli`), then take path 1.
 3. **You actually want managed onboarding:** run `veris env submit`, wait for the Veris team's email, then `veris env config pull` followed by `veris env push`.
 
 ## Base image runtime version too old for agent
