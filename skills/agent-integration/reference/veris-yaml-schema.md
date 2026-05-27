@@ -20,7 +20,7 @@ actor:
     method: POST
     url: http://localhost:8080/api/session
   channels:
-    - type: http                    # http | ws | email | function | voice | browser-use
+    - type: http                    # http | ws | email | function | voice_ws | browser-use
       url: http://localhost:8080/chat
       method: POST
       headers:
@@ -117,6 +117,22 @@ actor:
 ```
 
 `poll_interval` belongs on the email channel itself. Do not treat it as a general actor-global config knob.
+
+### Voice (`voice_ws`)
+
+```yaml
+actor:
+  channels:
+    - type: voice_ws
+      url: ws://localhost:8080/voice
+      protocol: binary              # currently only "binary" is supported
+      language: en-US               # optional, BCP-47
+      wait_for_callee_first: true   # optional, default true
+      max_call_duration_s: 600      # optional
+      silence_timeout_s: 12         # optional
+```
+
+Wire format is raw PCM16 / 24 kHz / mono over a binary WebSocket — no envelope, no control plane. See [voice-channels.md](voice-channels.md) for the full protocol, when to use a transport bridge for framework-native transports like LiveKit/WebRTC, and the trailing-silence convention that voice agents must follow for VAD-based end-of-turn detection.
 
 ### Function
 

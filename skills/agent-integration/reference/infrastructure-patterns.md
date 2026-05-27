@@ -742,6 +742,137 @@ Platform-hosted repos sometimes have Python files with syntax errors or import f
 
 ---
 
+## Pattern 9: Transport bridge
+
+**Typical setup:** The agent framework's native transport doesn't match what the actor channel speaks on the wire. The most common case is voice agents whose framework uses WebRTC end-to-end (LiveKit Agents, Daily, anything SFU-based) but where the Veris actor expects raw PCM16 over a WebSocket (the [`voice_ws`](voice-channels.md) channel). It also covers agents wired to SIP/Twilio media streams, agents that speak a custom binary protocol, and any case where the framework's transport layer is fixed and not negotiable.
+
+**Characteristics:** The agent ships, in production, against a transport you cannot bypass. Pointing the actor at the agent directly produces a protocol mismatch — the actor sends bytes the framework can't decode, or vice versa. The right answer is **not** to rewrite the agent's transport layer; it's to run a small bridge process inside the sandbox container that translates between the actor's channel format and whatever the framework already speaks.
+
+### How to identify
+
+- The agent uses a framework with a fixed media transport (WebRTC SFU, SIP media, etc.) that doesn't downgrade to raw audio over WS.
+- The actor channel you need is `voice_ws` (or any channel whose wire format the framework can't speak directly).
+- The framework's published transport plugins don't include one for the actor's channel format. For voice agents specifically, the quick check is: *can the framework serve a raw PCM16 WebSocket?* If yes (Pipecat with `RawAudioFrameSerializer`, most in-house frameworks), use that transport and skip this pattern — you don't need a bridge. If no (LiveKit Agents, Daily SDK, anything WebRTC-only), continue with this pattern.
+
+### Architecture
+
+```
+┌─────────────────┐   actor channel    ┌────────────────────────┐
+│  Veris actor    │ ──── voice_ws ───▶ │  bridge process        │
+│  (in sandbox)   │ ◀── PCM16 frames ─ │  (in sandbox container)│
+└─────────────────┘                    └───────────┬────────────┘
+                                                   │
+                                       framework's native transport
+                                       (WebRTC room / SIP media /
+                                        custom envelope / etc.)
+                                                   │
+                                                   ▼
+                                       ┌────────────────────────┐
+                                       │  agent framework       │
+                                       │  + your agent code     │
+                                       │  (in sandbox container)│
+                                       └────────────────────────┘
+```
+
+The bridge is the thin middle layer. It:
+
+1. Accepts the actor's channel connection (a WebSocket on the port `veris.yaml` advertises).
+2. Stands up the framework's native transport on the same host — for a WebRTC framework, that means joining a LiveKit room as a participant; for SIP, opening a media socket; for a custom envelope, opening the framework's WS and wrapping/unwrapping its envelope.
+3. Pumps audio (or other media) in both directions, with whatever framing translation the wire formats require.
+
+The agent code itself doesn't change. It participates in the framework's transport exactly the way it does in production — same room, same SDK, same tools, same prompt. The bridge is purely a sandbox-edge translator.
+
+### Restructuring steps
+
+**1. Identify the framework's native transport.** What does the agent actually speak when deployed for real? Browser-to-LiveKit-room? SIP trunk? A proprietary WSS with a specific envelope? That's the transport the bridge has to terminate.
+
+**2. Decide what runs in the sandbox container.** For an in-container WebRTC bridge you typically need three peer processes:
+
+| Process | Purpose |
+|---|---|
+| Framework's media server (e.g., `livekit-server --dev`) | Provides the rooms the agent and bridge will both join. Single binary, in-container. |
+| Agent worker | The framework SDK auto-dispatches into every new room. Talks to LLM, runs tools, etc. |
+| Bridge | FastAPI (or equivalent) listening on the actor's port. For each connection: join a fresh room as a participant, pump frames. |
+
+For a SIP-style bridge it's typically two processes (the SIP stack and the agent), but the shape is the same — one in-container service plus a small translation layer.
+
+**3. Write the bridge as a normal piece of the repo, not in `.veris/`.** Treat it as production code. If a future product surface needs to call the same agent over a raw WS (mobile app, kiosk, IVR vendor), the bridge ships with that product too — it's not Veris-specific. Put it next to the agent (`app/bridge.py` or similar), exercise it in your own tests, and keep `.veris/` as pure config plus the multi-process `start.sh` ([template 4](../templates/start-sh.md#template-4-peer-processes-with-fail-fast)).
+
+**4. Wire the entry point.** The bridge listens on the port that `veris.yaml` advertises as `agent.port`. The agent worker and the framework's media server run as background siblings in `start.sh`:
+
+```bash
+#!/bin/bash
+# .veris/start.sh — three peer processes
+set -e
+
+# 1. Framework's media server
+/usr/local/bin/livekit-server --dev --bind 0.0.0.0 &
+LK_PID=$!
+sleep 1
+
+# 2. Agent worker (registers against the in-container media server)
+cd /agent && uv run --no-sync python -m app.agent start &
+AG_PID=$!
+
+# 3. Bridge — listens on the actor's port
+cd /agent && uv run --no-sync uvicorn app.bridge:app \
+    --host 0.0.0.0 --port "${PORT:-8080}" &
+BR_PID=$!
+
+# Fail-fast: if any peer dies, take down the rest so Veris restarts cleanly.
+wait -n
+kill "$LK_PID" "$AG_PID" "$BR_PID" 2>/dev/null || true
+exit 1
+```
+
+See [start-sh.md Template 4](../templates/start-sh.md#template-4-peer-processes-with-fail-fast) for the rationale around `wait -n`.
+
+**5. Pull the framework's binary into the image.** For LiveKit, the cleanest path is a multi-stage Dockerfile that copies the prebuilt static binary from the official image:
+
+```dockerfile
+ARG GVISOR_BASE
+FROM livekit/livekit-server:latest AS lk-stage
+FROM ${GVISOR_BASE}
+
+# Framework media server (Go static binary — works on the gVisor base).
+COPY --from=lk-stage /livekit-server /usr/local/bin/livekit-server
+
+# Normal agent install
+COPY pyproject.toml /agent/
+WORKDIR /agent
+RUN uv sync --no-dev
+
+COPY app /agent/app
+COPY .veris/start.sh /agent/start.sh
+RUN chmod +x /agent/start.sh
+
+WORKDIR /app
+```
+
+For SIP or other media stacks, install the daemon from the distribution's package manager in the same `Dockerfile.sandbox` and skip the multi-stage copy.
+
+### Worked example: LiveKit Agents over `voice_ws`
+
+For a LiveKit-based voice agent driven through Veris's `voice_ws` actor:
+
+- The framework's media server is `livekit/livekit-server` in dev mode (`devkey`/`secret`). Self-contained, no external LiveKit Cloud account needed.
+- The agent worker uses `livekit-agents` with whatever realtime LLM you want — `openai.realtime.RealtimeModel`, `google.realtime.RealtimeModel`, `aws.realtime.RealtimeModel.with_nova_sonic_2`, or a chained STT/LLM/TTS pipeline. The worker is identical to the production worker; no Veris-specific code path.
+- The bridge accepts the `voice_ws` connection, mints a LiveKit access token (using `livekit-api` and the in-container dev creds), joins a fresh room as a participant called `veris-actor`, publishes incoming PCM16 frames via `rtc.AudioSource.capture_frame(AudioFrame(...))`, and subscribes to the agent's audio track via `rtc.AudioStream(track, sample_rate=24000, num_channels=1)`, writing each frame back out as `ws.send_bytes(bytes(frame.data))`.
+
+The agent code (its `Agent` subclass, `@function_tool()` methods, prompt, DB-backed tool dispatch) is untouched. In production it joins a room driven by a browser client or SIP gateway; in Veris it joins a room driven by the bridge. Same agent, same surface.
+
+### When *not* to use this pattern
+
+- The framework can already serve the actor's channel directly. Most notably: **Pipecat** can serve `voice_ws` natively by configuring `WebsocketServerTransport` with a `RawAudioFrameSerializer` instead of the default `ProtobufFrameSerializer`. If your framework has a transport plugin that emits/consumes bare PCM16 over WS, configure it and skip the bridge entirely — you keep one process in the container instead of three, and the failure modes are correspondingly simpler.
+- The actor channel matches the framework's production transport. If the agent is a plain HTTP chat API and Veris is driving it over the `http` channel, you're in Pattern 1, not 9. The bridge pattern only applies when the actor channel's wire format and the framework's transport differ.
+- You're tempted to "translate" semantic content (rewriting messages, adapting tool calls). That's a wrapper, not a bridge. A bridge translates *transport*, not behavior — the agent gets the same audio bytes it would get in production, just delivered via a different network path. If you find yourself reshaping tool-call JSON or normalizing speech-to-text output, stop; that's exactly the "no wrappers, no shims" rule from [SKILL.md](../SKILL.md).
+
+### Cost
+
+Adding a media-server peer process is real container weight — `livekit-server` is ~67 MB on disk, runs Go's network stack on top of gVisor, and binds a WebSocket plus a UDP/TCP RTC port internally. On a constrained sandbox, that's noticeable. The tradeoff is testing the agent against its production transport exactly as shipped. If the framework's transport can be swapped for a `voice_ws`-compatible one without lying about what production looks like (Pipecat's serializer config is the clean example), prefer that.
+
+---
+
 ## Common Rules Across All Patterns
 
 These apply regardless of which pattern the agent matches.

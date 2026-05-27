@@ -66,6 +66,47 @@ python -m app.webhook_listener &
 exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
+## Template 4: Peer processes with fail-fast
+
+Use this when the container holds **multiple peer processes that all must be alive for the agent to work**, and no single one of them is naturally "the" foreground process. The canonical case is a [transport bridge](../reference/infrastructure-patterns.md#pattern-9-transport-bridge): an in-container media server, the agent worker (which auto-dispatches into the media server's rooms), and the bridge that accepts the actor's channel connection — none of them can be the lone `exec`'d foreground because all three are equally critical.
+
+```bash
+#!/bin/bash
+# Multi-process container with fail-fast — if any peer dies, take down
+# the rest so Veris restarts the container cleanly instead of leaving a
+# partially-working stack serving broken responses.
+set -e
+
+# Peer 1: in-container service the agent depends on (media server, SIP daemon, etc.)
+/usr/local/bin/some-server --bind 0.0.0.0 &
+SVC_PID=$!
+
+# Give the server a beat to bind sockets before the worker starts probing it.
+sleep 1
+
+# Peer 2: agent worker (registers against the in-container service)
+cd /agent && uv run --no-sync python -m app.worker start &
+WK_PID=$!
+
+# Peer 3: bridge / API on the actor's port — also a peer, not the "main"
+cd /agent && uv run --no-sync uvicorn app.bridge:app \
+    --host 0.0.0.0 --port "${PORT:-8080}" &
+BR_PID=$!
+
+# Block until any one of the peers exits. wait -n returns when the first
+# child exits; the trailing kill + exit 1 makes sure the container goes
+# down too, so Veris can restart it instead of half-serving requests.
+wait -n
+echo "[start] a peer process exited — shutting down siblings"
+kill "$SVC_PID" "$WK_PID" "$BR_PID" 2>/dev/null || true
+exit 1
+```
+
+When to prefer this over Templates 1-3:
+
+- **Use Template 1** when there's one clear foreground process (the agent's HTTP server) and the rest are infrastructure it talks to (Redis, etc.). The agent process is the natural `exec` target; if Redis crashes, the agent's next request will fail loudly enough that you'll notice.
+- **Use Template 4** when peer processes are equally critical to the agent's wire contract and a silent crash of any one of them leaves the container *looking* healthy from outside (port still open, /health still returns 200) while actually serving broken responses. The media-server-plus-worker-plus-bridge shape is the prototypical case; bash's `wait -n` is the simplest way to make that container fail loudly.
+
 ## Rules
 
 - The LAST command must use `exec` (replaces shell process, receives signals correctly).

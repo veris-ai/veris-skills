@@ -121,6 +121,28 @@ agent:
     JIRA_BASE_URL: https://mycompany.atlassian.net
 ```
 
+## Example 5: Voice agent over `voice_ws`
+
+```yaml
+version: "1.0"
+
+actor:
+  channels:
+    - type: voice_ws
+      url: ws://localhost:8080/voice
+      language: en-US
+      wait_for_callee_first: true
+
+agent:
+  code_path: /agent
+  entry_point: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8080
+  port: 8080
+  environment:
+    LOG_LEVEL: info
+```
+
+The agent's framework must speak PCM16/24 kHz/mono over a bare binary WebSocket. If the framework's native transport doesn't match that (e.g., LiveKit Agents, anything WebRTC-only), use `entry_point: bash start.sh` instead and bundle a transport bridge — see [reference/voice-channels.md](../reference/voice-channels.md) and [Pattern 9](../reference/infrastructure-patterns.md#pattern-9-transport-bridge).
+
 ## Generation rules
 
 - Use `actor.channels`, not `persona.modality`

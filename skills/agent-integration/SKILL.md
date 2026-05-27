@@ -54,6 +54,7 @@ If the user says "go all the way", "do everything", or otherwise pre-approves th
 - For env overrides and mock credentials: [reference/env-var-overrides.md](reference/env-var-overrides.md)
 - For bundleable local infra: [reference/bundling-recipes.md](reference/bundling-recipes.md)
 - For container restructuring patterns: [reference/infrastructure-patterns.md](reference/infrastructure-patterns.md)
+- For voice agents (`voice_ws` channel, framework choice, trailing silence): [reference/voice-channels.md](reference/voice-channels.md)
 - For current `veris.yaml` structure: [reference/veris-yaml-schema.md](reference/veris-yaml-schema.md)
 - For generated config examples: [templates/veris-yaml.md](templates/veris-yaml.md)
 - For Dockerfile patterns: [templates/dockerfile-sandbox.md](templates/dockerfile-sandbox.md)
