@@ -22,6 +22,25 @@ Veris exists to test an agent under realistic conditions. The agent is the thing
 
 When in doubt: the agent's author should be able to read `.veris/` and recognize it as "the deploy config for Veris," not as "someone forked and patched my agent."
 
+### Transport bridges are the one explicit exception
+
+A **transport bridge** translates between the actor's channel format (e.g. `voice_ws` PCM16) and the agent framework's native transport (e.g. LiveKit WebRTC, SIP media, a proprietary message envelope) while preserving the underlying payload byte-for-byte. It is *not* a wrapper. The same shape exists in production for the agent's other product surfaces — mobile clients, kiosks, IVR vendors — so the bridge is genuine product code, not Veris-specific glue.
+
+A bridge is allowed when:
+
+- The agent's framework cannot be reconfigured to speak the actor's channel format directly (e.g., LiveKit Agents is WebRTC end-to-end and has no raw-PCM16-WS transport).
+- The bridge is pure transport translation: same audio bytes / same JSON payloads in and out, with no semantic reshaping. (For voice, the audio bytes the agent's model receives must be identical to what the actor sent. For text, the message payload the agent sees must be identical to what the actor sent.)
+- The bridge lives in the agent's repo as production code (e.g., `app/bridge.py`), exercised by the agent's own tests — not in `.veris/`. It is the agent's `voice_ws`-on-WebRTC product surface; Veris is just one caller.
+
+A bridge is **not** allowed when:
+
+- It reshapes content the agent sees: rewriting messages, restructuring tool-call JSON, normalizing STT output, translating Veris-specific actor fields into the agent's native parameters. That is a wrapper, and the no-wrapper rule above applies.
+- The framework *can* be configured to speak the actor's channel (Pipecat with `RawAudioFrameSerializer` for `voice_ws`, the framework's own HTTP plugin for `http`, etc.). Configure the framework first; bridge only if the transport is fixed.
+
+Quick rubric: "same bytes, different network format" = transport bridge (allowed). "Different bytes / different shape" = wrapper (not allowed).
+
+See [reference/infrastructure-patterns.md Pattern 9](reference/infrastructure-patterns.md#pattern-9-transport-bridge) for the architecture and [reference/voice-channels.md](reference/voice-channels.md) for the voice-specific application.
+
 ## Core rules
 
 - Explain what you are about to do before each major step.
@@ -54,6 +73,7 @@ If the user says "go all the way", "do everything", or otherwise pre-approves th
 - For env overrides and mock credentials: [reference/env-var-overrides.md](reference/env-var-overrides.md)
 - For bundleable local infra: [reference/bundling-recipes.md](reference/bundling-recipes.md)
 - For container restructuring patterns: [reference/infrastructure-patterns.md](reference/infrastructure-patterns.md)
+- For voice agents (`voice_ws` channel, framework choice, trailing silence): [reference/voice-channels.md](reference/voice-channels.md)
 - For current `veris.yaml` structure: [reference/veris-yaml-schema.md](reference/veris-yaml-schema.md)
 - For generated config examples: [templates/veris-yaml.md](templates/veris-yaml.md)
 - For Dockerfile patterns: [templates/dockerfile-sandbox.md](templates/dockerfile-sandbox.md)
