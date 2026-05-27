@@ -136,12 +136,12 @@ This is expected — the scaffolded config is a placeholder with commented-out e
 
 ## `veris env push` returns 409: managed onboarding
 
-If `veris env push` returns `[409] Run veris env submit first to complete managed onboarding`, the env was created in managed-setup mode (the default for plain `veris env create`). The backend's build gate checks `env.onboard_status` and only permits image pushes from envs at `None` or `completed`; freshly created envs are at `not_started`. `-f` / `--force` does not bypass this — it only affects the local config sync-guard, not the server-side gate.
+If `veris env push` returns `[409] Run veris env submit first to complete managed onboarding`, the env was created in managed-setup mode (the default for plain `veris env create`). Managed-setup envs do not accept image pushes until onboarding completes. `-f` / `--force` does not bypass this — it only affects the local config sync-guard, not the server-side gate.
 
 For this skill's audience (self-authoring `.veris/`), `--self-serve` at create time is the right fix. Three recovery paths in increasing order of effort:
 
 1. **You forgot `--self-serve`:** `veris env delete <env-id>`, then `veris env create --self-serve --name <name>`. Re-set any `veris env vars set` values on the new env, and update `.veris/config.yaml` if the env id changed.
-2. **Your CLI doesn't show `--self-serve`:** the flag was added in veris-cli 2.27.0 (#164). Upgrade using the install manager that owns `veris` (`uv tool upgrade veris-cli` or `pip install -U veris-cli`), then take path 1.
+2. **Your CLI doesn't show `--self-serve`:** upgrade to veris-cli 2.27.0 or newer using the install manager that owns `veris` (`uv tool upgrade veris-cli` or `pip install -U veris-cli`), then take path 1.
 3. **You actually want managed onboarding:** run `veris env submit`, wait for the Veris team's email, then `veris env config pull` followed by `veris env push`.
 
 ## Base image runtime version too old for agent
