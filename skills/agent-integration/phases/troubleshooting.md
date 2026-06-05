@@ -76,6 +76,18 @@ Common causes:
 
 Check `reference/service-mapping.md` and `reference/env-var-overrides.md`.
 
+## Grader flags a voice agent for hallucinating tools it actually called
+
+Symptom: a `voice_ws` / phone agent runs its tools correctly (the agent logs, and any mock-service logs, show the calls happening and the database changing), but the grader reports "no tool call," "fabricated," or "claimed an action without calling the tool."
+
+Cause: the agent uses **client tools** (ElevenLabs Conversational AI, OpenAI Realtime, Gemini Live, …) that execute in-process and round-trip on the vendor WebSocket, so they never reach the spoken transcript the voice grader reads. Without an explicit report, the grader is blind to them. This is a grading-visibility issue, not an agent bug — the actions really happened.
+
+Fix: emit an `agent_tool_call` event per tool call — see [reference/voice-channels.md](../reference/voice-channels.md#making-client-tool-calls-visible-to-the-grader) for the contract and copy-paste hook. If you already added the hook and still see this, check:
+
+1. `event_type` is exactly `agent_tool_call`, and `data.name` / `data.arguments` are present (the renderer needs both).
+2. `SIMULATION_ID` is set in the agent process — it's exported by the sandbox; if your hook silently no-ops, it isn't reading the env you think it is.
+3. The POST is actually landing — a swallowed connection error logs `could not report <tool> to engine`. Confirm `ENGINE_URL` (default `http://localhost:6100`) is reachable from the agent.
+
 ## Database connection fails
 
 Common causes:
