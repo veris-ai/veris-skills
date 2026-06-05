@@ -22,7 +22,7 @@ Veris exists to test an agent under realistic conditions. The agent is the thing
 
 When in doubt: the agent's author should be able to read `.veris/` and recognize it as "the deploy config for Veris," not as "someone forked and patched my agent."
 
-### Transport bridges are the one explicit exception
+### Transport bridges are an explicit exception
 
 A **transport bridge** translates between the actor's channel format (e.g. `voice_ws` PCM16) and the agent framework's native transport (e.g. LiveKit WebRTC, SIP media, a proprietary message envelope) while preserving the underlying payload byte-for-byte. It is *not* a wrapper. The same shape exists in production for the agent's other product surfaces — mobile clients, kiosks, IVR vendors — so the bridge is genuine product code, not Veris-specific glue.
 
@@ -40,6 +40,20 @@ A bridge is **not** allowed when:
 Quick rubric: "same bytes, different network format" = transport bridge (allowed). "Different bytes / different shape" = wrapper (not allowed).
 
 See [reference/infrastructure-patterns.md Pattern 9](reference/infrastructure-patterns.md#pattern-9-transport-bridge) for the architecture and [reference/voice-channels.md](reference/voice-channels.md) for the voice-specific application.
+
+### Reporting client-tool calls to the grader is a sanctioned exception (voice agents only)
+
+This is the one exception that genuinely breaks the "no Veris-specific code path" rule — and it is deliberate. It applies only to **voice agents built on hosted speech-to-speech platforms** (ElevenLabs Conversational AI, OpenAI Realtime, Gemini Live, and the like) that run their tools as **client tools** — the tool executes inside the agent process and the call round-trips on the vendor's WebSocket.
+
+Why it's needed: the voice grader builds its trace from the spoken transcript plus any tool-call events the agent reports. A client tool never reaches the transcript, so without a report the grader can't see the tool ran and false-flags real actions (a card freeze, a replacement) as hallucinations. Text/HTTP agents don't have this problem — their tool calls are captured automatically — so this exception is voice-only.
+
+The fix: after each tool runs, the agent POSTs an `agent_tool_call` event to the sandbox engine, and the platform renders it into the graded trace. Keep it strictly minimal so it stays instrumentation, not a wrapper:
+
+- **No-op outside a simulation.** Gate on `SIMULATION_ID` (unset in production → return immediately). Production behavior is unchanged.
+- **Fire-and-forget, fail-soft.** Short timeout, swallow errors, log a warning. A reporting failure must never break the call or change the agent's output.
+- **Observe, don't reshape.** Report *after* the real tool runs, passing the real name/args/result through unchanged. It records what happened; it does not alter what the agent does or what the model sees.
+
+This is sanctioned only for client-tool grader visibility, only for voice agents, and only in this minimal shape — it is not a license for general shims. The exact endpoint, event schema, and a copy-paste hook are in [reference/voice-channels.md](reference/voice-channels.md#making-client-tool-calls-visible-to-the-grader).
 
 ## Core rules
 
@@ -73,7 +87,7 @@ If the user says "go all the way", "do everything", or otherwise pre-approves th
 - For env overrides and mock credentials: [reference/env-var-overrides.md](reference/env-var-overrides.md)
 - For bundleable local infra: [reference/bundling-recipes.md](reference/bundling-recipes.md)
 - For container restructuring patterns: [reference/infrastructure-patterns.md](reference/infrastructure-patterns.md)
-- For voice agents (`voice_ws` channel, framework choice, trailing silence): [reference/voice-channels.md](reference/voice-channels.md)
+- For voice agents (`voice_ws` channel, framework choice, trailing silence, **reporting client-tool calls so the grader can see them**): [reference/voice-channels.md](reference/voice-channels.md)
 - For current `veris.yaml` structure: [reference/veris-yaml-schema.md](reference/veris-yaml-schema.md)
 - For generated config examples: [templates/veris-yaml.md](templates/veris-yaml.md)
 - For Dockerfile patterns: [templates/dockerfile-sandbox.md](templates/dockerfile-sandbox.md)
@@ -382,6 +396,8 @@ Explain:
 
 If you believe *any* agent-side code change is needed, flag it here and stop. The default answer is zero code changes. If you can't see a way forward without one, it's probably a Veris platform gap, not an integration step.
 
+The single pre-sanctioned exception: a **client-tool voice agent** (ElevenLabs Conversational AI, OpenAI Realtime, Gemini Live, …) needs the `agent_tool_call` reporting hook so the grader can see its tools — see the [Core framing exception](#reporting-client-tool-calls-to-the-grader-is-a-sanctioned-exception-voice-agents-only) and [reference/voice-channels.md](reference/voice-channels.md#making-client-tool-calls-visible-to-the-grader). That one is expected; add it without escalating. Everything else still stops here.
+
 Wait for approval before proceeding.
 
 ---
@@ -477,6 +493,8 @@ If you find yourself wanting to change the agent's source, stop. Either:
 - Veris can't accommodate the agent as-shipped (then it's a platform gap — escalate)
 
 Unrelated refactors are obviously out.
+
+**The one sanctioned source addition** is the client-tool reporting hook for voice agents (see the [Core framing exception](#reporting-client-tool-calls-to-the-grader-is-a-sanctioned-exception-voice-agents-only)). It is the deliberate exception to "no code changes," not a counterexample to it: it's a no-op outside a simulation, it never alters the agent's behavior, and it exists solely so the grader can see client tools that otherwise never reach the trace. Add it for client-tool voice agents; don't generalize it into other source edits.
 
 Proceed directly to Phase 6 once the files are in place.
 

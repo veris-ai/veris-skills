@@ -203,6 +203,113 @@ agent:
 
 The agent receives `{"type":"audio","audio":"<b64 PCM16>"}` messages from the actor and replies with the same shape. The actor handles base64 encoding/decoding on its side; the agent's job is to (un)wrap the JSON envelope around the same PCM16 bytes it would handle in binary mode.
 
+## Making client-tool calls visible to the grader
+
+This is the one place a voice integration adds Veris-aware code to the agent. It's a deliberate exception to the skill's no-Veris-specific-code rule (see [SKILL.md](../SKILL.md#reporting-client-tool-calls-to-the-grader-is-a-sanctioned-exception-voice-agents-only)) — keep it as minimal as the snippet below.
+
+### The problem
+
+For voice simulations the grader's trace is reconstructed from **two sources only**: the spoken transcript (the actor's STT'd turns and the agent's STT'd replies) and any `agent_tool_call` events the agent reports to the engine. Hosted speech-to-speech platforms run their tools as **client tools** — ElevenLabs Conversational AI, OpenAI Realtime function calls handled in your process, Gemini Live, Vapi client-side tools. The tool executes *inside your agent process* and the call and its result round-trip on the vendor's WebSocket; they never appear in the spoken transcript.
+
+So unless the agent reports them, the grader sees only words. It can't distinguish an agent that actually froze the card from one that only said it did, and it will false-flag real, completed actions (freezes, replacements, lookups) as hallucinations or "no tool call." Text/HTTP agents don't hit this — the OTel pipeline captures their tool calls automatically. Voice is the gap.
+
+### The fix: emit an `agent_tool_call` event per tool
+
+After each client tool runs, POST an event to the sandbox engine. The platform's trace renderer turns each one into an assistant `tool_calls` turn plus a `tool` result turn, interleaved with the spoken turns by timestamp — the same shape a text agent's trace has, so one grader works for both.
+
+**Endpoint**
+
+```
+POST {ENGINE_URL}/simulations/{SIMULATION_ID}/events
+```
+
+Both values come from the agent's own environment, set by the sandbox: `SIMULATION_ID` is exported into the container, and `ENGINE_URL` defaults to `http://localhost:6100` (the engine port is fixed). Outside a simulation `SIMULATION_ID` is unset — that's the signal to no-op.
+
+**Body**
+
+```json
+{
+  "service": "agent",
+  "event_type": "agent_tool_call",
+  "data": { "name": "<tool name>", "arguments": { }, "result": "<any>" }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `event_type` | yes | Must be exactly `agent_tool_call` — that's what the renderer keys on. |
+| `data.name` | yes | The tool name. Becomes the assistant `tool_calls[].name`. The renderer errors if it's missing. |
+| `data.arguments` | yes | The call arguments, as an object. Rendered as the call's arguments. |
+| `data.result` | no | The tool's return value. If present, becomes the `tool` result turn; omit for tools with no return value. |
+| `service` | yes | Use `"agent"`. |
+
+Serialize the body with `default=str` so enums and datetimes in the args or result don't raise.
+
+**Copy-paste hook**
+
+```python
+import os
+import json
+import logging
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+_ENGINE_URL = os.environ.get("ENGINE_URL", "http://localhost:6100")
+_SIMULATION_ID = os.environ.get("SIMULATION_ID")
+
+
+def report_tool_call(name: str, arguments: dict, result: object) -> None:
+    """Report a client-tool call to the Veris engine so it lands in the graded
+    trace. No-op outside a simulation; never raises into the call path."""
+    if not _SIMULATION_ID:
+        return
+    body = json.dumps(
+        {
+            "service": "agent",
+            "event_type": "agent_tool_call",
+            "data": {"name": name, "arguments": arguments, "result": result},
+        },
+        default=str,
+    )
+    try:
+        httpx.post(
+            f"{_ENGINE_URL}/simulations/{_SIMULATION_ID}/events",
+            content=body,
+            headers={"Content-Type": "application/json"},
+            timeout=2.0,
+        )
+    except Exception as exc:
+        logger.warning("[tool] could not report %s to engine: %s", name, exc)
+```
+
+Call it from the single place every client tool resolves — right after the real tool runs, before you hand the result back to the vendor SDK:
+
+```python
+def handler(**arguments):
+    result = tool_fn(**arguments)
+    report_tool_call(name, arguments, result)     # observe, don't reshape
+    return json.dumps(result, default=str)        # vendor wants a string — see the pitfall below
+```
+
+### Keep it an exception, not a wrapper
+
+Three constraints keep this honest — they are what make it instrumentation rather than the kind of shim the skill forbids:
+
+- **No-op in production**, gated on `SIMULATION_ID`. No Veris-specific behavior ships to real callers.
+- **Fire-and-forget, fail-soft** (short timeout, swallowed exceptions). Reporting must never break or delay the call.
+- **Observe after the fact** — the same name/args/result the tool already produced, with no reshaping of anything the model sees.
+
+If you find yourself changing arguments, rewriting results, or branching the agent's *behavior* on `SIMULATION_ID`, you've crossed from instrumentation into a wrapper — stop.
+
+### Verify it worked
+
+After a smoke simulation:
+
+- Confirm `agent_tool_call` events appear in the sim's event stream (the engine records them alongside the spoken turns).
+- Read the grader's justifications — they should reference your tools by name ("called `change_card_status` with …"). If the grader says the agent "made no tool call" or "fabricated" an action your agent logs show it performed, the emit is missing or `event_type` / `data.name` is wrong. See [troubleshooting.md](../phases/troubleshooting.md#grader-flags-a-voice-agent-for-hallucinating-tools-it-actually-called).
+
 ## Common pitfalls
 
 - **Wrong sample rate.** If the agent emits 16 kHz or 48 kHz instead of 24 kHz, the actor's STT will fail silently — you'll see "actor never responds" rather than an error. Confirm 24 kHz end to end.
