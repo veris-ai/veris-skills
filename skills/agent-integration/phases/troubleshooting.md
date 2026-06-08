@@ -88,6 +88,20 @@ Fix: emit an `agent_tool_call` event per tool call — see [reference/voice-chan
 2. `SIMULATION_ID` is set in the agent process — it's exported by the sandbox; if your hook silently no-ops, it isn't reading the env you think it is.
 3. The POST is actually landing — a swallowed connection error logs `could not report <tool> to engine`. Confirm `ENGINE_URL` (default `http://localhost:6100`) is reachable from the agent.
 
+## Voice agent never answers under load (`callee_no_answer`)
+
+Symptom: a LiveKit-based `voice_ws` agent connects fine in a single local smoke test, but under concurrent simulations a chunk of calls end in `callee_no_answer` — the actor connects, the room is created, but the agent never joins. The failure rate climbs with concurrency.
+
+Cause: LiveKit's worker/auto-dispatch model has two race/throttle traps a plain WS server doesn't (see [infrastructure-patterns.md → LiveKit dispatch gotchas](../reference/infrastructure-patterns.md#livekit-dispatch-gotchas)):
+
+1. **Dispatch race.** The worker registers with the SFU asynchronously, and auto-dispatch only fires for rooms created *after* registration. If the bridge accepts a caller before the worker registers (a fixed `sleep` instead of a real gate), the room exists but the agent is never dispatched into it. Under load, registration can take 10s+.
+2. **CPU self-throttle.** A prod-mode `AgentServer` refuses dispatch when its CPU load function exceeds 0.7; with the SFU + worker + bridge + realtime session sharing one pod, that trips under load and the SFU reports "no workers with sufficient capacity."
+
+Fix (both are agent-side; neither needs a `veris-sandbox` change):
+
+1. Gate the bridge on the worker's `registered worker` log line (poll, ~60s ceiling), not a fixed sleep — see the `start.sh` in [Pattern 9](../reference/infrastructure-patterns.md#pattern-9-transport-bridge).
+2. Disable the throttle: `AgentServer(load_fnc=lambda *_: 0.0)`.
+
 ## Database connection fails
 
 Common causes:
