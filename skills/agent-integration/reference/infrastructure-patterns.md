@@ -805,23 +805,41 @@ For a SIP-style bridge it's typically two processes (the SIP stack and the agent
 # .veris/start.sh — three peer processes with fail-fast
 # Intentionally no `set -e` here — see Template 4 for the rationale.
 
-# 1. Framework's media server
+wait_for_port() {  # poll a TCP port until it accepts, or give up
+  local host="$1" port="$2"
+  for _ in $(seq 1 100); do
+    (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null && { exec 3>&- 3<&-; return 0; }
+    sleep 0.2
+  done
+  return 1
+}
+
+# 1. Framework's media server — wait until it actually accepts before continuing.
 /usr/local/bin/livekit-server --dev --bind 0.0.0.0 &
 LK_PID=$!
-sleep 1
+wait_for_port localhost 7880 || { echo "livekit-server never came up" >&2; exit 1; }
 
-# 2. Agent worker (registers against the in-container media server)
-uv run --no-sync python -m app.agent start &
+# 2. Agent worker. It registers with the SFU *asynchronously*; capture its log
+#    so we can gate on real registration, and mirror it to stdout for agent.log.
+uv run --no-sync python -m app.agent start > /tmp/worker.log 2>&1 &
 AG_PID=$!
+tail -f /tmp/worker.log & TAIL_PID=$!
 
-# 3. Bridge — listens on the actor's port
-uv run --no-sync uvicorn app.bridge:app \
-    --host 0.0.0.0 --port "${PORT:-8080}" &
+# 3. GATE the bridge on the worker registering — NOT a fixed sleep. Auto-dispatch
+#    only fires for rooms created *after* the worker registers; under load that
+#    can take 10s+. Accept a caller too early and the agent never joins the room
+#    (the actor sees callee_no_answer). See "LiveKit dispatch gotchas" below.
+for _ in $(seq 1 120); do
+  grep -q "registered worker" /tmp/worker.log 2>/dev/null && break
+  kill -0 "$AG_PID" 2>/dev/null || break
+  sleep 0.5
+done
+
+# 4. Bridge — listens on the actor's port.
+uv run --no-sync uvicorn app.bridge:app --host 0.0.0.0 --port "${PORT:-8080}" &
 BR_PID=$!
 
-cleanup() {
-  kill "$LK_PID" "$AG_PID" "$BR_PID" 2>/dev/null || true
-}
+cleanup() { kill "$LK_PID" "$AG_PID" "$BR_PID" "$TAIL_PID" 2>/dev/null || true; }
 trap 'cleanup; exit 143' TERM INT
 
 # Fail-fast: when any peer dies, take down the rest so Veris restarts cleanly.
@@ -867,6 +885,25 @@ For a LiveKit-based voice agent driven through Veris's `voice_ws` actor:
 - The bridge accepts the `voice_ws` connection, mints a LiveKit access token (using `livekit-api` and the in-container dev creds), joins a fresh room as a participant called `veris-actor`, publishes incoming PCM16 frames via `rtc.AudioSource.capture_frame(AudioFrame(...))`, and subscribes to the agent's audio track via `rtc.AudioStream(track, sample_rate=24000, num_channels=1)`, writing each frame back out as `ws.send_bytes(bytes(frame.data))`.
 
 The agent code (its `Agent` subclass, `@function_tool()` methods, prompt, DB-backed tool dispatch) is untouched. In production it joins a room driven by a browser client or SIP gateway; in Veris it joins a room driven by the bridge. Same agent, same surface.
+
+### LiveKit dispatch gotchas
+
+LiveKit Agents' worker/auto-dispatch model has two failure modes a plain WS server doesn't, and both surface identically: the actor connects, nobody answers, and the sim ends in `callee_no_answer`. They only bite under concurrent cluster load — a single local smoke test passes and the problem appears at scale. Both fixes live in the agent's own code; neither needs a `veris-sandbox` change.
+
+**1. Gate the bridge on worker registration — never a fixed `sleep`.** The worker registers with the SFU *asynchronously*, and the SFU only auto-dispatches into rooms created *after* registration. The bridge creates a room the instant the actor opens `/voice`; if that happens first, the worker is never dispatched into the room and the actor hears silence. A fixed `sleep 5` races — under load registration can take 10s+. Gate on the real signal: tail the worker log and wait for the `registered worker` line (with a ceiling, ~60s) before the bridge starts accepting calls. This is the gate in the `start.sh` above — it replaces the naive `sleep 1` that works locally and fails under load.
+
+**2. Disable the worker's CPU self-throttle.** A `start` (prod-mode) `AgentServer` ships a CPU-based load function with a 0.7 threshold and *refuses dispatch* when the host is busy — the SFU then reports "no workers with sufficient capacity" and, again, the agent never joins. In the sandbox the SFU, worker, bridge, and the realtime session all share one CPU-bound pod, so under concurrent load that threshold trips constantly. This worker handles exactly one call per pod and must never refuse, so pin load to zero:
+
+```python
+from livekit.agents import AgentServer
+
+# Never self-throttle: one call per pod, must always accept dispatch.
+server = AgentServer(load_fnc=lambda *_: 0.0)
+```
+
+(dev mode already defaults the threshold to infinity for this reason; a prod-mode `start` worker does not.)
+
+Symptom for both: intermittent `callee_no_answer` that worsens with concurrency. If a handful of parallel sims pass but a larger batch shows ~half failing to connect, suspect these before anything in the bridge or the audio path. See [troubleshooting.md](../phases/troubleshooting.md#voice-agent-never-answers-under-load-callee_no_answer).
 
 ### When *not* to use this pattern
 
