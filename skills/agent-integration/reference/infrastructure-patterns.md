@@ -905,6 +905,12 @@ server = AgentServer(load_fnc=lambda *_: 0.0)
 
 Symptom for both: intermittent `callee_no_answer` that worsens with concurrency. If a handful of parallel sims pass but a larger batch shows ~half failing to connect, suspect these before anything in the bridge or the audio path. See [troubleshooting.md](../phases/troubleshooting.md#voice-agent-never-answers-under-load-callee_no_answer).
 
+### Hosted-runtime variant: Vapi (outbound bridge, inbound webhook)
+
+When the framework is a hosted cloud runtime rather than an in-container stack, the bridge shape inverts. A Vapi agent needs **no media server and no worker process** — the agent process itself serves `voice_ws` and, per call, creates a Vapi call over the API and opens an outbound WSS to Vapi's cloud, pumping PCM16 both ways. One process in the container; no `start.sh` choreography.
+
+What Vapi adds instead is an **inbound** requirement: tools are delivered as HTTP `tool-calls` webhooks from Vapi's cloud to a public `server.url`, so the pod must be publicly reachable. The two ways to provide that — an in-pod ngrok tunnel (with a hard free-tier concurrency limit: one agent session per authtoken) or a stable shared `PUBLIC_BASE_URL` endpoint — plus Vapi's silent string-result trap are covered in [voice-channels.md → Vapi](voice-channels.md#vapi-hosted-runtime-server-tool-webhooks).
+
 ### When *not* to use this pattern
 
 - The framework can already serve the actor's channel directly. Most notably: **Pipecat** can serve `voice_ws` natively by configuring `WebsocketServerTransport` with a `RawAudioFrameSerializer` instead of the default `ProtobufFrameSerializer`. If your framework has a transport plugin that emits/consumes bare PCM16 over WS, configure it and skip the bridge entirely — you keep one process in the container instead of three, and the failure modes are correspondingly simpler. (Pipecat's WS transports have one well-defined failure mode of their own — they don't honor `audio_out_auto_silence` — so you still need a small silence-tail processor on the pipeline; see [voice-channels.md](voice-channels.md#pipecat-ws-transports-need-explicit-end-of-turn-silence) for the recipe.)

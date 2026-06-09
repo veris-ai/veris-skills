@@ -132,7 +132,7 @@ actor:
 
 Audio is PCM16 / 24 kHz / mono. The `protocol` field selects the wire framing:
 
-- **`binary`** — raw PCM16 bytes per WebSocket message; close = hangup. Matches Gemini Live, ElevenLabs, AssemblyAI, Cartesia.
+- **`binary`** — raw PCM16 bytes per WebSocket message; close = hangup. Matches Gemini Live, ElevenLabs, Vapi, AssemblyAI, Cartesia.
 - **`json`** — JSON envelope `{"type":"audio","audio":"<b64 PCM16>"}` plus `{"type":"end"}` for graceful close. Matches OpenAI Realtime, Twilio media streams, Deepgram.
 
 See [voice-channels.md](voice-channels.md) for the full protocol, when to use a transport bridge for framework-native transports like LiveKit/WebRTC, and the trailing-silence convention that voice agents must follow for VAD-based end-of-turn detection.

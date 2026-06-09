@@ -102,6 +102,28 @@ Fix (both are agent-side; neither needs a `veris-sandbox` change):
 1. Gate the bridge on the worker's `registered worker` log line (poll, ~60s ceiling), not a fixed sleep — see the `start.sh` in [Pattern 9](../reference/infrastructure-patterns.md#pattern-9-transport-bridge).
 2. Disable the throttle: `AgentServer(load_fnc=lambda *_: 0.0)`.
 
+## Vapi calls fail to connect under concurrency (ngrok contention)
+
+Symptom: a Vapi-based `voice_ws` agent passes single smoke tests and small batches, but in a larger concurrent batch most calls end in `callee_no_answer` — the agent never finishes setting up the Vapi call. Agent logs show repeated ngrok spawn attempts ending in a session-limit error (e.g. `ERR_NGROK_334`).
+
+Cause: Vapi delivers tool calls as HTTP webhooks to a public `server.url`, and the common integration spawns an in-pod ngrok tunnel to provide one. Free-tier ngrok allows **one agent session per authtoken** — every concurrent pod contends for it, and the losers retry with backoff, exhaust their attempts, and fail call setup. It looks like a flaky agent; it's the tunnel.
+
+Fix, in increasing order of robustness:
+
+1. **Serialize** — run one simulation at a time; each gets the single tunnel in turn.
+2. **Remove the limit** — a paid ngrok plan or a (free) Cloudflare Tunnel allows concurrent tunnels.
+3. **Shared stable endpoint (production shape)** — set `PUBLIC_BASE_URL` to one public webhook endpoint so pods skip in-pod tunnels entirely, and route inside it by `call.id`. Vapi correlates tool results by `toolCallId`, not by connection, so one stateless endpoint serves the whole fleet.
+
+See [voice-channels.md → Vapi](../reference/voice-channels.md#vapi-hosted-runtime-server-tool-webhooks).
+
+## Vapi agent acts like its tool returned nothing
+
+Symptom: the agent's logs show the tool executed and the `/tool` webhook returned a result, but the model behaves as if it got no observation — it stalls, apologizes, or claims it couldn't complete the action. Vapi's call logs show "No result returned".
+
+Cause: the webhook response didn't match Vapi's schema. The `result` field must be a JSON **string** (not a dict) and the response must be HTTP 200 — anything else is silently dropped and the model continues with no observation. Nothing hangs and nothing errors, so the failure is invisible in the agent's own logs.
+
+Fix: wrap every successful result with `json.dumps(output, default=str)` (single-line), return failures as a string under the `error` key, and always return 200. See the [tool-result pitfall](../reference/voice-channels.md#common-pitfalls).
+
 ## Database connection fails
 
 Common causes:

@@ -43,7 +43,7 @@ See [reference/infrastructure-patterns.md Pattern 9](reference/infrastructure-pa
 
 ### Reporting client-tool calls to the grader is a sanctioned exception (voice agents only)
 
-This is the one exception that genuinely breaks the "no Veris-specific code path" rule — and it is deliberate. It applies only to **voice agents built on hosted speech-to-speech platforms** (ElevenLabs Conversational AI, OpenAI Realtime, Gemini Live, and the like) that run their tools as **client tools** — the tool executes inside the agent process and the call round-trips on the vendor's WebSocket.
+This is the one exception that genuinely breaks the "no Veris-specific code path" rule — and it is deliberate. It applies only to **voice agents built on hosted speech-to-speech platforms** (ElevenLabs Conversational AI, OpenAI Realtime, Gemini Live, Vapi, and the like) whose tools execute inside the agent process — as **client tools** that round-trip on the vendor's WebSocket, or as Vapi-style **server tools** the platform POSTs back to the agent's webhook over HTTP. Either way the call never reaches the spoken transcript.
 
 Why it's needed: the voice grader builds its trace from the spoken transcript plus any tool-call events the agent reports. A client tool never reaches the transcript, so without a report the grader can't see the tool ran and false-flags real actions (a card freeze, a replacement) as hallucinations. Text/HTTP agents don't have this problem — their tool calls are captured automatically — so this exception is voice-only.
 
