@@ -6,7 +6,7 @@ The canonical Veris voice channel is `voice_ws`. It carries PCM16 / 24 kHz / mon
 
 | `protocol` | Framing | Maps cleanly to |
 |---|---|---|
-| `binary` (default) | Bare PCM16 bytes per WS message; WS close = hangup | Gemini Live, ElevenLabs, AssemblyAI, Cartesia |
+| `binary` (default) | Bare PCM16 bytes per WS message; WS close = hangup | Gemini Live, ElevenLabs, Vapi, AssemblyAI, Cartesia |
 | `json` | JSON envelope `{"type":"audio","audio":"<b64>"}` + `{"type":"end"}` | OpenAI Realtime, Twilio media streams, Deepgram |
 
 Pick the framing that matches the agent's native transport. If neither matches and you can't reconfigure the framework, [Pattern 9](infrastructure-patterns.md#pattern-9-transport-bridge) covers the in-container bridge.
@@ -157,6 +157,8 @@ The actor will always speak whichever framing the channel is configured for. The
 
 The first question to ask of any voice agent is which of these three applies. If the framework's transport is fixed and matches neither `binary` nor `json` framing, you are in case (2) and need a bridge — that's not a Veris limitation, it's a property of the framework.
 
+Hosted runtimes are case (3) with a twist: the agent process serves `voice_ws` itself and bridges *outbound* to the vendor's cloud. See [Vapi](#vapi-hosted-runtime-server-tool-webhooks) below for the worked shape, including the public-webhook requirement its server tools add.
+
 ## Worked examples
 
 ### `protocol: binary` — bridge / Pipecat / direct PCM16 endpoint
@@ -203,13 +205,38 @@ agent:
 
 The agent receives `{"type":"audio","audio":"<b64 PCM16>"}` messages from the actor and replies with the same shape. The actor handles base64 encoding/decoding on its side; the agent's job is to (un)wrap the JSON envelope around the same PCM16 bytes it would handle in binary mode.
 
+## Vapi: hosted runtime, server-tool webhooks
+
+Vapi is a hosted voice runtime — endpointing, turn-taking, STT, the LLM call, and TTS all run on Vapi's cloud. There is no library to embed and no in-container media server (contrast the LiveKit shape in [Pattern 9](infrastructure-patterns.md#pattern-9-transport-bridge)): the agent process itself serves `voice_ws` (`protocol: binary`) and acts as an outbound bridge. Per actor connection it:
+
+1. POSTs `https://api.vapi.ai/call` with an **inline assistant** (prompt, model, voice, transcriber, tools — config is per-call; there is no persistent agent record to pin) and a WebSocket transport: `transport.provider: vapi.websocket` with `audioFormat` `pcm_s16le` / `raw` / `24000`, matching the actor's audio contract exactly.
+2. Dials the `transport.websocketCallUrl` Vapi returns and pumps PCM16 both ways between the actor WS and the Vapi WS.
+3. Flushes the ~1700 ms end-of-turn silence burst when Vapi sends `speech-update` with `role=assistant`, `status=stopped`. Vapi streams audio only while the assistant is speaking, so the [trailing-silence convention](#turn-detection-and-the-trailing-silence-convention) applies in full.
+
+### Tools require a public inbound URL
+
+Tools are the integration's distinctive piece. Each Vapi tool carries a `server.url`; when the LLM picks one, Vapi's *cloud* POSTs a `tool-calls` webhook to that URL and takes the result from the HTTP response. There is no way to answer a tool call over the audio WebSocket — client→server messages on that socket carry only audio and call control. So the sandbox pod must be publicly reachable:
+
+- **In-pod tunnel** — spawn `ngrok http $PORT` lazily on the first `/voice` call (needs `NGROK_AUTHTOKEN` set via `veris env vars set`, and the `ngrok` binary installed in `Dockerfile.sandbox`) and point each tool's `server.url` at the tunnel. Works out of the box for single calls and small batches.
+- **Shared stable endpoint** — set `PUBLIC_BASE_URL` and skip the tunnel entirely: point every call at one public webhook and route inside it by `call.id`. Vapi correlates tool results purely by `toolCallId`, not by connection, so one stateless endpoint serves arbitrarily many concurrent calls. This is the production shape and the concurrency-safe one.
+
+**Free-tier ngrok allows one agent session per authtoken**, so concurrent simulations contend for the single tunnel: losing pods retry the spawn with backoff, and under sustained concurrency they exhaust their retries, call setup fails, and the actor sees `callee_no_answer`. A batch where most calls fail to connect looks like a flaky agent when it's the tunnel — see [troubleshooting](../phases/troubleshooting.md#vapi-calls-fail-to-connect-under-concurrency-ngrok-contention).
+
+### The silent string-result trap
+
+The tool webhook must answer `{"results": [{"toolCallId": ..., "result": "<string>"}]}` with the result as a JSON **string** (`json.dumps(output, default=str)`), over HTTP 200. ElevenLabs at least fails loudly on this class of mistake (a `1008` disconnect); **Vapi fails silently**: a non-string `result` — or a non-200 response — is dropped, Vapi logs "No result returned", and the model continues with **no observation at all**. The agent appears to ignore its own tools. Keep results single-line strings, return failures as a string under the `error` key, and always return 200.
+
+### Grader visibility
+
+Vapi's server tools execute in your process via the webhook and never reach the spoken transcript, so they hit exactly the visibility gap described in the next section. Emit the `agent_tool_call` event from the single `/tool` dispatch point, on both the success and error paths.
+
 ## Making client-tool calls visible to the grader
 
 This is the one place a voice integration adds Veris-aware code to the agent. It's a deliberate exception to the skill's no-Veris-specific-code rule (see [SKILL.md](../SKILL.md#reporting-client-tool-calls-to-the-grader-is-a-sanctioned-exception-voice-agents-only)) — keep it as minimal as the snippet below.
 
 ### The problem
 
-For voice simulations the grader's trace is reconstructed from **two sources only**: the spoken transcript (the actor's STT'd turns and the agent's STT'd replies) and any `agent_tool_call` events the agent reports to the engine. Hosted speech-to-speech platforms run their tools as **client tools** — ElevenLabs Conversational AI, OpenAI Realtime function calls handled in your process, Gemini Live, Vapi client-side tools. The tool executes *inside your agent process* and the call and its result round-trip on the vendor's WebSocket; they never appear in the spoken transcript.
+For voice simulations the grader's trace is reconstructed from **two sources only**: the spoken transcript (the actor's STT'd turns and the agent's STT'd replies) and any `agent_tool_call` events the agent reports to the engine. Hosted speech-to-speech platforms run their tools as **client tools** — ElevenLabs Conversational AI, OpenAI Realtime function calls handled in your process, Gemini Live — or, like Vapi, as **server tools** the platform POSTs back to your webhook over HTTP. Either way the tool executes *inside your agent process* and the call and its result round-trip on the vendor's WebSocket (or webhook); they never appear in the spoken transcript.
 
 So unless the agent reports them, the grader sees only words. It can't distinguish an agent that actually froze the card from one that only said it did, and it will false-flag real, completed actions (freezes, replacements, lookups) as hallucinations or "no tool call." Text/HTTP agents don't hit this — the OTel pipeline captures their tool calls automatically. Voice is the gap.
 
@@ -317,7 +344,7 @@ After a smoke simulation:
 - **WAV/RIFF headers.** Send raw PCM samples (or base64 of raw PCM in JSON mode), not a WAV file. If you're using a TTS that defaults to WAV, request `format: "pcm"` or `response_format: "pcm"`.
 - **Framing mismatch.** A binary WS message in `protocol: json` mode (or a text/JSON message in `protocol: binary` mode) is a protocol violation — the actor will disconnect. Make sure the agent's transport and the channel's `protocol` field agree.
 - **Missing silence between turns.** Covered above — the most common cause of "simulation hangs after the first turn."
-- **Tool-result payloads must serialize as strings, not dicts.** Voice tool platforms (ElevenLabs `client_tool_result.result`, OpenAI Realtime `function_call_output.output`, Vapi tool webhooks) each validate the result field against their own schema — most expect a string. Returning a `model_dump()` dict from a Pydantic model gets rejected by the orchestrator (ElevenLabs disconnects with `1008 policy violation: ClientToolResultClientToOrchestratorEvent`) and the sim hangs until timeout instead of failing loudly. Wrap with `json.dumps(result, default=str)` — the `default=str` covers enums and datetimes that aren't natively JSON-serializable.
+- **Tool-result payloads must serialize as strings, not dicts.** Voice tool platforms (ElevenLabs `client_tool_result.result`, OpenAI Realtime `function_call_output.output`, Vapi tool webhooks) each validate the result field against their own schema — most expect a string. Returning a `model_dump()` dict from a Pydantic model gets rejected by the orchestrator (ElevenLabs disconnects with `1008 policy violation: ClientToolResultClientToOrchestratorEvent`) and the sim hangs until timeout instead of failing loudly. Vapi's variant is quieter still: a non-string `result` (or a non-200 response) is silently dropped — Vapi logs "No result returned" and the model continues with no observation, so nothing hangs and nothing errors. Wrap with `json.dumps(result, default=str)` — the `default=str` covers enums and datetimes that aren't natively JSON-serializable.
 - **WebRTC frameworks need a real dispatch gate, not a `sleep`.** LiveKit Agents (and any framework whose worker is *dispatched* into rooms) registers with its media server asynchronously and self-throttles on CPU by default. Bring the actor-facing bridge up before the worker registers, or leave the prod-mode CPU throttle on, and a chunk of calls under load end in `callee_no_answer` with no audio — passing every single-call local test first. Gate on the worker's registration log line and pin its load function to zero — see [infrastructure-patterns.md → LiveKit dispatch gotchas](../reference/infrastructure-patterns.md#livekit-dispatch-gotchas).
 
 ## Not yet covered
