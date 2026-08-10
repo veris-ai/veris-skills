@@ -193,15 +193,17 @@ receipt, and teardown are all its job:
 
 ```bash
 veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
-  --image maven:3-eclipse-temurin-21 \
-  -v "$PWD:/work" -v "$PWD/.m2:/root/.m2" -w /work \
+  --image <your-test-image> \
   -e SOME_CREDENTIAL="..." \
   --require-service stripe \
-  -- mvn -q verify
+  -- make integration
 ```
 
-(`--sandbox "$SANDBOX_ID"` in place of `--environment` when attaching to an
-MCP-managed sandbox.)
+`<your-test-image>` and the test command are whatever Phase 0 step 5 settled
+on; the bind-mounted stock-image shape brings its mounts with it (e.g.
+`--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -v "$PWD/.m2:/root/.m2"
+-w /work -- mvn -q verify`). Use `--sandbox "$SANDBOX_ID"` in place of
+`--environment` when attaching to an MCP-managed sandbox.
 
 - `-v`, `-e`, `-w` pass through to the workload container. Credentials the
   code expects still come from its environment, exactly as in production —
