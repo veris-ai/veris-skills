@@ -1,6 +1,6 @@
 ---
 name: integration-testing
-description: Run a repo's integration tests against a Veris dependency sandbox instead of real vendors, with veris-proxy transparently rerouting the code's outbound HTTP(S). Verifies prerequisites (API key, Veris MCP server, veris-proxy binary, committed .veris.toml), creates a per-run sandbox, starts and canary-checks the proxy, proves interception with a smoke test, then runs the real tests. Use when code that talks to external services needs its integration behavior verified before a change is called done.
+description: Run a repo's integration tests against a Veris dependency sandbox instead of real vendors, with veris-proxy rerouting the code's outbound HTTP(S) at the kernel level. Verifies prerequisites (API key, Veris MCP server, veris-proxy binary, docker), creates a sandbox, runs the tests in a container beside the proxy with one command, and proves the sandbox actually received the traffic before trusting any green. Use when code that talks to external services needs its integration behavior verified before a change is called done.
 ---
 
 Run this repo's integration tests against a Veris dependency sandbox.
@@ -8,11 +8,11 @@ Run this repo's integration tests against a Veris dependency sandbox.
 The sandbox is a set of stateful, contract-accurate twins of the services this
 code depends on. The code under test is **never modified and never told**: it
 keeps its production hostnames, credentials, and client stack, and
-`veris-proxy` reroutes its outbound HTTP(S) into the sandbox. Your job is to
-stand that pipeline up, prove it is actually intercepting, and only then trust
-any test result.
+`veris-proxy` reroutes its outbound HTTP(S) into the sandbox from outside the
+process. Your job is to stand that pipeline up, prove it actually intercepted,
+and only then trust any test result.
 
-## Core framing: green means nothing without the canary
+## Core framing: green means nothing without proof of interception
 
 Everything in this skill exists to make one sentence true: *a passing test
 proves the integration works against the sandbox*. Two rules follow.
@@ -20,41 +20,73 @@ proves the integration works against the sandbox*. Two rules follow.
 - **Never modify the code under test to point it at Veris.** No base-URL
   overrides, no injected config, no test doubles. If the code path you test is
   not the code path that ships, the green is fiction. The proxy is the whole
-  mechanism; if the proxy cannot cover a runtime (see the coverage table),
-  that is a mode decision, not a license to patch the code.
-- **Never report tests as passing without a fresh canary check.** A proxy left
-  over from an earlier run, a half-set environment, or a runtime that silently
-  ignores proxy variables all look identical to success. `veris-proxy check`
-  fails closed on each of these. Run it after setting the environment and
-  before drawing any conclusion from a test result. If the canary fails,
-  interception is not live and nothing downstream means anything.
+  mechanism.
+- **Never report tests as passing without evidence the sandbox received the
+  traffic.** A suite that quietly stopped calling its dependency, a runtime
+  that ignored the interception, and a working run all print the same test
+  output. The proxy prints a **receipt** — what the sandbox actually received,
+  per service — after every run, and `--require-service <name>` turns an empty
+  receipt into exit code 3. Always pass `--require-service` for each service
+  the tests are supposed to exercise, and read the receipt before drawing any
+  conclusion.
 
-Do not declare the task done, and do not present results to the user as
-passing, until the tests are green **and** the canary was live for that run.
+Do not declare the task done until the tests are green **and** the receipt
+shows the sandbox received the traffic the tests were supposed to send.
+
+## The two modes, and why container wins
+
+`veris-proxy run` has two tiers:
+
+- **Container (`run --image ...`) — the default; use it whenever docker is
+  available.** The proxy runs in its own container and your image runs in a
+  second one sharing its network namespace; an `iptables` redirect moves the
+  traffic in the kernel, below every library. Nothing in the process under
+  test has to cooperate, so it covers **every** runtime: Java, static Go
+  binaries, Apache HttpClient, aiohttp, SDKs that pin their own CA bundle.
+  Your image needs no capability, no iptables, no entrypoint change, and no
+  particular base — distroless and scratch work. All requirements sit on the
+  proxy's own container.
+- **Host (`run -- <cmd>`) — the fallback for work that cannot run in a
+  container.** Runs the command locally with proxy and CA environment
+  variables set, which is a *request*, not an enforcement: it covers only
+  libraries that honour those variables. Known gaps, all covered by the
+  container tier: Go on macOS (verifies via Security.framework), Apache
+  HttpClient `createDefault()`, `aiohttp` without `trust_env=True`, the
+  Stripe Python/Ruby SDKs (own CA bundle). `run` prints what it cannot cover
+  to stderr — read those warnings.
+
+There is no committed proxy config to maintain. `--sandbox <id>` derives the
+whole routing — which production hostnames map to which sandbox services —
+from the control plane plus a routing table measured against the real vendors
+and embedded in the binary. Do not write hosts files by hand;
+`veris-proxy serve --sandbox <id> --print-routes` shows the derived routing if
+you need to inspect it.
 
 ## Phase 0 — Preflight (once per project)
 
 Work through these gates in order. Each is check-first: if it already holds,
-move on silently. Ask before installing anything or creating remote resources.
+move on silently. Ask before installing anything.
 
 ### 1. API key
 
 `VERIS_API_KEY` must be set in the environment. If it is missing, stop and ask
 the user for it — it arrives out of band (Veris console or their team) and you
-must never write it into any file in the repo. `VERIS_API_URL` names the
-control plane; if unset, ask for it alongside the key.
+must never write it into any file in the repo. `VERIS_API_BASE` names the
+control plane base URL; it defaults to `https://api.veris.ai`, so set it only
+when the user's team runs elsewhere.
 
 ### 2. Veris MCP server
 
-The control plane is driven **through MCP only**. Check whether the `veris`
-MCP tools are available to you: `get_testing_guide`, `get_environment`,
-`create_sandbox`, `get_sandbox`, `reset_sandbox`, `delete_sandbox`.
+Sandbox lifecycle is driven **through MCP**. Check whether the `veris` MCP
+tools are available to you: `get_testing_guide`, `get_environment`,
+`create_sandbox`, `get_sandbox`, `reset_sandbox`, `promote_sandbox`,
+`delete_sandbox`.
 
 If they are not, instruct the user to register the server and restart the
 session — a server registered mid-session is not loaded into it:
 
 ```bash
-claude mcp add veris --transport http "$VERIS_API_URL/mcp" \
+claude mcp add veris --transport http "$VERIS_API_BASE/mcp" \
   --header "X-API-Key: $VERIS_API_KEY"
 ```
 
@@ -82,137 +114,115 @@ The installer drops a static binary into `~/.local/bin` (no root, no package
 manager), so the same line works on a laptop, in CI, and inside a container
 build.
 
-### 4. Committed `.veris.toml`
+### 4. Docker, and the proxy's runner image
 
-The repo's Veris test configuration lives in a committed, team-shared
-`.veris.toml` at the repo root. If it exists, use it. If not, build it now:
+Container mode needs `docker` on PATH. The proxy's own image is pulled
+automatically from Veris's registry; a first run wants one-time registry
+auth:
 
-1. `get_environment` with the env id — from `VERIS_ENV_ID`, or ask the user
-   which environment this repo tests against (if they have none, that is an
-   environment-creation task upstream of this skill). This yields the service
-   names the sandbox will offer.
-2. **Discover the real hostnames** the code believes it calls, from repo
-   evidence: config files, `application*.yml`, `.env.example`, constants,
-   SDK defaults. Cite the evidence. These hostnames — not sandbox URLs — go
-   in the service map; the proxy's job is to claim them.
-3. Set `upstream_base_url` to the sandbox ingress origin, always `https`
-   (e.g. `https://svc.dev.api.veris.ai`): create a sandbox and take the
-   origin of its service URLs, upgrading `http` to `https`.
-4. Decide `[run]` (see the mode table below) and record the test command.
-5. Write the file, show it to the user, and commit it with their approval.
-
-```toml
-# .veris.toml — committed, team-shared, no secrets
-[veris]
-env_id = "env_abc123"
-api_url = "https://api.veris.ai"     # the key itself stays in $VERIS_API_KEY
-
-[proxy]
-upstream_base_url = "https://svc.dev.api.veris.ai"   # sandbox ingress; always https
-allow_passthrough = ["@build"]       # package registries; add private ones
-# listen defaults to 127.0.0.1:8080; set it only if that port is taken
-
-[services.stripe]                     # one table per sandbox service
-hosts = ["api.stripe.com", "*.stripe.com"]   # what the CODE believes it calls
-
-[run]
-mode = "host"                        # host | container — decided once, below
-test_cmd = "make integration"
-# container_image = "..."            # when mode = "container"
-# reason = "why this mode"           # leave a trail for the next agent
+```bash
+gcloud auth configure-docker us-central1-docker.pkg.dev
 ```
 
-Two values are deliberately absent: `sandbox_id` and the canary token are
-per-run and arrive as flags. A committed canary would defeat stale-proxy
-detection — the token only proves anything because each run mints its own.
-Never commit secrets, sandbox URLs, or tunnel hostnames.
+If docker is genuinely unavailable (some CI shapes, a machine without a
+daemon), fall back to host mode and record why.
 
-### Choosing `[run] mode` — once, with evidence
+### 5. Decide how the tests run in a container
 
-This is more than a proxy limitation question: some code cannot easily run in
-a container, some runtimes cannot be covered outside one. Assess, decide,
-record the decision and its reason in `[run]`, and confirm with the user.
+The image under test needs nothing Veris-specific, so the choice is purely
+about the repo:
 
-| Evidence in the repo | Mode |
+| Evidence in the repo | Choice |
 |---|---|
-| Tests run on the host today; runtime is Python, Node, Ruby, .NET, or JVM | `host` |
-| Go code under test **on macOS** (ignores `SSL_CERT_FILE`, verifies via Security.framework) | `container` |
-| JVM using Apache HttpClient `createDefault()` (ignores JVM proxy properties) | `container` |
-| Static binaries / anything that ignores proxy env vars | `container` |
-| Repo is dockerized and its tests already run in Docker | `container` |
-| Host tier's canary or TLS fails after honest setup | switch to `container`, record why |
+| A Dockerfile / test image the team already uses | use it as `--image` |
+| No image, interpreted or JVM runtime | stock language image + bind-mount the repo: `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -w /work` (adjust for node/python/etc.) |
+| No image, compiled binary | build it in a stock toolchain image the same way |
+| Cannot run containerised at all | host mode, note the coverage warnings |
 
-`container` mode uses the proxy's transparent tier (`--transparent` +
-iptables REDIRECT, `--cap-add=NET_ADMIN`, CA in the image's trust store) —
-see `container/README.md` in veris-proxy. Nothing in the process has to
-cooperate, which is why it covers what host mode cannot.
+Mount dependency caches too when they exist (`-v "$PWD/.m2:/root/.m2"`,
+node_modules, pip cache) — the proxy does not intercept package registries by
+default, so dependency resolution works normally either way.
+
+One constraint: the image must not run as uid 14741 (the uid the kernel
+redirect exempts for the proxy itself). The CLI refuses with an explanation
+if it does; `--proxy-uid` moves the exemption.
 
 ## Phase 1 — Every run
 
-Autonomous once preflight holds. The loop, in order — do not reorder, because
-each step's failure mode is caught by the next:
+Autonomous once preflight holds.
 
 ### 1. Create the sandbox
 
-`create_sandbox` with the env id (pass `client_base_url` only if the code
-must receive webhooks — see the testing guide for tunneling). Poll
-`get_sandbox` until `ready`; stop and read `failure_reason` on `failed`.
-Note each service's `url` and `control_url`.
+`create_sandbox` with the environment id (from `VERIS_ENVIRONMENT_ID` or the
+user). Poll `get_sandbox` until `ready`; stop and read `failure_reason` on
+`failed`. Note each service's `url` and `control_url` — `/veris/*` control
+endpoints always live on `control_url`.
 
-### 2. Start the proxy
+For a fully self-contained run, `--environment <env_id>` on the command below
+replaces this step: the proxy deploys a fresh sandbox itself and deletes it
+when the run ends (`--ttl-minutes` bounds a leak if teardown never runs).
+Prefer MCP-managed sandboxes when you need to seed state or run several
+suites against one world; prefer `--environment` for one-shot runs and for
+webhook tests, where a sandbox per run avoids two runs overwriting each
+other's callback registration.
 
-Mint a fresh canary; `.veris.toml` (including `upstream_base_url`) is found
-automatically from the repo root:
+### 2. Run the tests through the proxy
 
-```bash
-CANARY="run-$(date +%s)-$RANDOM"
-veris-proxy serve --sandbox-id "$SANDBOX_ID" --canary "$CANARY" &
-```
-
-Sanity-check the committed `upstream_base_url` against the **origin** of the
-service URLs `get_sandbox` returned (scheme + host, no path — always prefer
-`https` even if the control plane prints `http` URLs). If they differ, pass
-`--upstream <origin>` to both `serve` and `env` for this run and tell the
-user the committed value looks stale.
-
-### 3. Environment, trust, canary
+One command — proxy container, workload container, environment, trust,
+receipt, and teardown are all its job:
 
 ```bash
-eval "$(veris-proxy env --sandbox-id "$SANDBOX_ID" --canary "$CANARY")"
-veris-proxy check    # exit 2 = interception NOT live; fix before proceeding
+veris-proxy run --sandbox "$SANDBOX_ID" \
+  --image maven:3-eclipse-temurin-21 \
+  -v "$PWD:/work" -v "$PWD/.m2:/root/.m2" -w /work \
+  -e SOME_CREDENTIAL="..." \
+  --require-service stripe \
+  -- mvn -q verify
 ```
 
-Read `env`'s stderr warnings — they name exactly what the environment cannot
-cover. For JVM code: run `veris-proxy trust --java` once (env then emits
-`JAVA_TOOL_OPTIONS` automatically, which Gradle/Maven test forks inherit).
-If the app loads its **own** keystore from disk (a mounted `keystore.p12` is
-the common shape), the JVM default truststore is never consulted — put the CA
-where the app actually looks: `veris-proxy trust --inject path/to/keystore`.
+- `-v`, `-e`, `-w` pass through to the workload container. Credentials the
+  code expects still come from its environment, exactly as in production —
+  the sandbox publishes known-good credentials readable at
+  `{control_url}/veris/data`; the service's manual
+  (`{control_url}/veris/manual`) names where.
+- With no command after `--`, the image's own ENTRYPOINT/CMD run untouched.
+- `--require-service <name>[:count]`, repeatable — the assertion that makes
+  an empty receipt fail. Use one per service the suite must touch.
+- Exit codes: the command's own status; `3` = a `--require-service` /
+  `--require-callback` went unmet; `4` = outcome indeterminate (treat as
+  failure, not success).
+- By default only mapped hosts are rerouted; everything else (registries,
+  telemetry, internal APIs) reaches its real destination. Add `--strict` for
+  a run that must prove the code reached nothing but the sandbox — an
+  unmapped host then fails with a 502 naming the host, which is information,
+  not an obstacle.
+- `--keep-proxy` leaves the proxy container up afterwards for inspection.
 
-### 4. Smoke test before real tests
+Host-mode fallback is the same command without `--image`:
+`veris-proxy run --sandbox "$SANDBOX_ID" -- make integration`. Read its
+stderr warnings — they name exactly what the environment cannot cover. For a
+long-lived interactive session instead of per-run supervision, use
+`veris-proxy serve --sandbox <id> --write-env <file>`, source the file, and
+run `veris-proxy check` before trusting any result — `check` fails closed
+(exit 2) on a missing proxy, a non-Veris proxy, or a proxy left over from an
+earlier run against different data.
 
-Prove interception through the repo's **own client stack** — not a bare curl:
-one read and one write against a mapped service, exercising the same HTTP
-client, TLS setup, and auth the production code uses. Verify the write landed
-by querying the sandbox directly (`{control_url}/veris/data`, bypassing the
-proxy). Seeded sandbox data that the real vendor could not have returned is
-the cleanest possible proof. If the repo has no cheap entry point, write one
-minimal test and keep it — it is the canary's application-level twin.
+### 3. Receiving webhooks
 
-### 5. Run the real tests
+The proxy routes your code OUT; a webhook comes back IN, and a sandbox in the
+cluster cannot reach an app on your laptop. `--expose <port>` (the port your
+app listens on) opens a public tunnel and registers it with the sandbox;
+`--require-callback <path>[:count]` (or `'*'`) asserts delivery the same way
+`--require-service` asserts egress — a webhook suite that received nothing
+must not pass. Your app is handed `VERIS_PUBLIC_URL` and registers it with
+the vendor through the vendor's own API, because that registration call is
+also code under test. Combine with `--environment` so concurrent runs cannot
+overwrite each other's callback URL.
 
-Run `[run] test_cmd`. Strict mode is the default and stays on: an unmapped
-host fails with a 502 naming the host — that is information, not an obstacle.
-Either the host belongs to a service (add it to the map) or it is
-infrastructure (add it to `allow_passthrough`). The `@build` preset already
-covers public package registries, so dependency resolution works in the same
-phase as the tests; private registries (Artifactory, corporate mirrors) get
-their own explicit entry.
-
-### 6. Set up cases, force failures, diagnose
+### 4. Set up cases, force failures, diagnose
 
 - Seed state through `{control_url}/veris/data` / `seed`; read the service's
-  own manual at `{control_url}/veris/manual` before testing it.
+  manual at `{control_url}/veris/manual` before testing it.
 - Inject faults and latency per the testing guide to force the unhappy paths
   — retries, duplicates, out-of-order deliveries are exactly what the
   stateful twins exist to catch.
@@ -221,12 +231,14 @@ their own explicit entry.
   the code. The trace shows the wire exchange; most "sandbox bugs" are
   harness bugs.
 - `reset_sandbox` between suites for a fresh coherent world — never mid-test.
+  Once a sandbox holds a world worth keeping, `promote_sandbox` makes it the
+  environment's default for later runs.
 
-### 7. Teardown
+### 5. Teardown
 
-Kill the proxy, `delete_sandbox`. Sandboxes are ephemeral and yours to break;
-leave nothing running that a later session could accidentally trust — that is
-the exact staleness the canary guards against.
+`delete_sandbox` (or let `--environment` do it). Sandboxes are ephemeral and
+yours to break; leave nothing running that a later session could accidentally
+trust.
 
 ## Reporting back
 
@@ -240,8 +252,7 @@ end — it goes back to Veris, and it is how the twins improve.
 
 - installing veris-proxy
 - registering the MCP server (the user runs this — it needs a restart)
-- committing `.veris.toml`
 - anything that sends repo code or data to a new external destination
 
 Sandbox lifecycle operations (`create_sandbox`, `reset_sandbox`,
-`delete_sandbox`) are routine and yours to perform freely.
+`delete_sandbox`, `promote_sandbox`) are routine and yours to perform freely.
