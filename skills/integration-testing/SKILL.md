@@ -60,11 +60,14 @@ claude mcp add veris --transport http "$VERIS_API_URL/mcp" \
 
 Then stop. Do not fall back to raw HTTP against the control plane.
 
-Once connected, call `get_testing_guide` first and read it fully — seeding,
-resets, fault injection, time control, diagnosis. It is the authority on
-sandbox mechanics; this skill does not repeat it.
+### 3. Generic client testing guide
 
-### 3. veris-proxy binary
+Once the MCP server is connected, call `get_testing_guide` and read the
+returned guide fully before creating a sandbox or planning tests. It is the
+client-facing authority on sandbox mechanics: seeding, resets, fault
+injection, time control, callbacks, and diagnosis.
+
+### 4. veris-proxy binary
 
 Check first — never reinstall over a working binary:
 
@@ -82,7 +85,7 @@ The installer drops a static binary into `~/.local/bin` (no root, no package
 manager), so the same line works on a laptop, in CI, and inside a container
 build.
 
-### 4. Committed `.veris.toml`
+### 5. Committed `.veris.toml`
 
 The repo's Veris test configuration lives in a committed, team-shared
 `.veris.toml` at the repo root. If it exists, use it. If not, build it now:
