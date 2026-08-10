@@ -223,6 +223,27 @@ on; the bind-mounted stock-image shape brings its mounts with it (e.g.
   not an obstacle.
 - `--keep-proxy` leaves the proxy container up afterwards for inspection.
 
+The command after `--` is arbitrary and the receipt covers whatever ran, so
+shape the invocation to the work:
+
+- **One suite**: `-- make integration` (or the repo's own test entrypoint).
+- **Several steps in one interception session**: chain them through the
+  image's shell — `-- bash -lc 'python seed_fixtures.py && pytest
+  tests/integration -x'`. Data generation, setup, and tests all run behind
+  the same proxy and land on the same receipt.
+- **An iterative loop** — generate data, run a test, read
+  `{control_url}/veris/requests`, adjust, run again: hold the world in an
+  MCP-managed sandbox and invoke `veris-proxy run --sandbox "$SANDBOX_ID"
+  ... -- <next thing>` as many times as the work needs. The sandbox and all
+  its state survive between invocations; only the proxy and workload
+  containers are recreated, which costs seconds, and each invocation prints
+  its own receipt. Deploying a fresh `--environment` sandbox per iteration
+  is the expensive way to get a worse loop.
+
+Do not try to keep one workload container running and exec into it — each
+`run` invocation is cheap precisely so that the container can be disposable
+while the sandbox is not.
+
 ### 3. Receiving webhooks
 
 The proxy routes your code OUT; a webhook comes back IN, and a sandbox in the
