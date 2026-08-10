@@ -55,7 +55,7 @@ which sandbox services — is derived from the control plane plus a routing
 table measured against the real vendors and embedded in the binary. Never
 write hosts files by hand.
 
-## Phase 0 — Preflight (once per project)
+## Phase 0 — Preflight (once per environment)
 
 Work through these gates in order. Each is check-first: if it already holds,
 move on silently. Ask before installing anything.
@@ -122,25 +122,45 @@ If docker is genuinely unavailable (some CI shapes, a machine without a
 daemon), stop and tell the user — this skill does not run without the
 container tier.
 
-### 5. Decide how the tests run in a container
+### 5. Make the tests runnable in a container
 
-The image under test needs nothing Veris-specific, so the choice is purely
-about the repo:
+Every run uses `--image`, so the tests must run inside one — but the image
+needs nothing Veris-specific, so this is ordinary dockerization, and usually
+no work at all:
 
-| Evidence in the repo | Choice |
+| Evidence in the repo | What to use |
 |---|---|
 | A Dockerfile / test image the team already uses | use it as `--image` |
 | No image, interpreted or JVM runtime | stock language image + bind-mount the repo: `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -w /work` (adjust for node/python/etc.) |
 | No image, compiled binary | build it in a stock toolchain image the same way |
-| Cannot run containerised at all | stop and tell the user; do not fall back |
 
 Mount dependency caches too when they exist (`-v "$PWD/.m2:/root/.m2"`,
 node_modules, pip cache) — the proxy does not intercept package registries by
-default, so dependency resolution works normally either way.
+default, so dependency resolution works normally either way. If the repo
+genuinely cannot run containerised (a hardware dependency, a host-only
+harness), stop and tell the user; do not fall back to running on the host.
 
 One constraint: the image must not run as uid 14741 (the uid the kernel
 redirect exempts for the proxy itself). The CLI refuses with an explanation
 if it does; `--proxy-uid` moves the exemption.
+
+### 6. Prepare the environment's default world
+
+A fresh sandbox starts from the environment's default world, and every
+per-run `--environment` sandbox in Phase 1 inherits it — so state the tests
+always need is seeded **once, here**, not per run:
+
+1. `create_sandbox`, poll `get_sandbox` until `ready`.
+2. Read each service's manual (`{control_url}/veris/manual`) and seed through
+   `{control_url}/veris/data` / `seed`, per the testing guide.
+3. Verify the world reads back the way the tests expect.
+4. `promote_sandbox` — the sandbox's world becomes the environment's
+   default; every later `create_sandbox` (including the proxy's per-run
+   ones) and `reset_sandbox` starts from it.
+5. `delete_sandbox`.
+
+If the boot-profile world already fits the tests, skip this — the default
+seed is designed to be usable without preparation.
 
 ## Phase 1 — Every run
 
@@ -156,13 +176,15 @@ runs). A sandbox per run is hermetic, and for webhook tests it is also the
 safe shape — two runs sharing a sandbox would overwrite each other's
 callback registration.
 
-The exception is a world you have to prepare before the tests — state seeded
-first, several suites against one world, post-run inspection. Provision that
-sandbox yourself through MCP (`create_sandbox`, poll `get_sandbox` until
-`ready`, stopping to read `failure_reason` on `failed`; `delete_sandbox`
-when finished) and hand it to the proxy with `--sandbox <id>`. Note each
-service's `url` and `control_url` — `/veris/*` control endpoints always live
-on `control_url`.
+State the tests always need is not a reason to leave this default: it lives
+in the environment's promoted world (Phase 0, step 6), which every per-run
+sandbox starts from. The exception is narrower — one-off state for a single
+investigation, several suites sharing one evolving world, or post-run
+inspection. Provision that sandbox yourself through MCP (`create_sandbox`,
+poll `get_sandbox` until `ready`, stopping to read `failure_reason` on
+`failed`; `delete_sandbox` when finished) and hand it to the proxy with
+`--sandbox <id>`. Note each service's `url` and `control_url` — `/veris/*`
+control endpoints always live on `control_url`.
 
 ### 2. Run the tests through the proxy
 
@@ -226,8 +248,9 @@ overwrite each other's callback URL.
   the code. The trace shows the wire exchange; most "sandbox bugs" are
   harness bugs.
 - `reset_sandbox` between suites for a fresh coherent world — never mid-test.
-  Once a sandbox holds a world worth keeping, `promote_sandbox` makes it the
-  environment's default for later runs.
+  When ad-hoc seeding produces a world every future run should start from,
+  fold it into the environment's default with `promote_sandbox` (Phase 0,
+  step 6) instead of re-seeding each time.
 
 ### 5. Teardown
 
