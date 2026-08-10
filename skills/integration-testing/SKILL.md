@@ -217,12 +217,18 @@ covers public package registries, so dependency resolution works in the same
 phase as the tests; private registries (Artifactory, corporate mirrors) get
 their own explicit entry.
 
-### 7. Use sandbox controls and diagnose failures
+### 7. Set up cases, force failures, diagnose
 
-Follow the generic testing guide for state setup, resets, fault and latency
-injection, time control, callbacks, and request-trace diagnosis. Follow the
-already-read service manuals for service-specific values and behavior. Do not
-duplicate or infer those rules here.
+- Seed state through `{control_url}/veris/data` / `seed` according to the
+  generic testing guide and the already-read service manual.
+- Inject faults and latency per the testing guide to force the unhappy paths
+  — retries, duplicates, out-of-order deliveries are exactly what the
+  stateful twins exist to catch.
+- When a test fails, check `{control_url}/veris/requests` **before forming a
+  theory**, and reproduce with curl before blaming the sandbox, the proxy, or
+  the code. The trace shows the wire exchange; most "sandbox bugs" are
+  harness bugs.
+- `reset_sandbox` between suites for a fresh coherent world — never mid-test.
 
 ### 8. Teardown
 
