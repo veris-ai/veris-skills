@@ -1,6 +1,6 @@
 ---
 name: integration-testing
-description: Run a repo's integration tests against a Veris dependency sandbox instead of real vendors, with veris-proxy rerouting the code's outbound HTTP(S) at the kernel level. Verifies prerequisites (API key, Veris MCP server, veris-proxy binary, docker), creates a sandbox, runs the tests in a container beside the proxy with one command, and proves the sandbox actually received the traffic before trusting any green. Use when code that talks to external services needs its integration behavior verified before a change is called done.
+description: Run a repo's integration tests against a Veris dependency sandbox instead of real vendors, with veris-proxy rerouting the code's outbound HTTP(S) at the kernel level. Verifies prerequisites (API key, Veris MCP server, veris-proxy binary, docker), then runs the tests in a container beside the proxy with one command that deploys a per-run sandbox and proves the sandbox actually received the traffic before trusting any green. Use when code that talks to external services needs its integration behavior verified before a change is called done.
 ---
 
 Run this repo's integration tests against a Veris dependency sandbox.
@@ -49,12 +49,13 @@ variables only. Do not use it in this skill: it covers only libraries that
 honour proxy variables, and its gaps are silent. If the work truly cannot
 run in a container, stop and tell the user rather than falling back.)
 
-There is no committed proxy config to maintain. `--sandbox <id>` derives the
-whole routing — which production hostnames map to which sandbox services —
-from the control plane plus a routing table measured against the real vendors
-and embedded in the binary. Do not write hosts files by hand;
-`veris-proxy serve --sandbox <id> --print-routes` shows the derived routing if
-you need to inspect it.
+There is no committed proxy config to maintain. Whether the run names an
+`--environment` or a `--sandbox`, the whole routing — which production
+hostnames map to which sandbox services — is derived from the control plane
+plus a routing table measured against the real vendors and embedded in the
+binary. Do not write hosts files by hand; given an existing sandbox,
+`veris-proxy serve --sandbox <id> --print-routes` shows the derived routing
+without starting anything.
 
 ## Phase 0 — Preflight (once per project)
 
@@ -71,10 +72,12 @@ when the user's team runs elsewhere.
 
 ### 2. Veris MCP server
 
-Sandbox lifecycle is driven **through MCP**. Check whether the `veris` MCP
-tools are available to you: `get_testing_guide`, `get_environment`,
-`create_sandbox`, `get_sandbox`, `reset_sandbox`, `promote_sandbox`,
-`delete_sandbox`.
+The control plane is driven **through MCP** — the testing guide, the
+environment's shape, and any sandbox you manage yourself (the per-run
+`--environment` sandboxes in Phase 1 are the proxy's job, but seeded worlds,
+resets, and promotion are yours). Check whether the `veris` MCP tools are
+available to you: `get_testing_guide`, `get_environment`, `create_sandbox`,
+`get_sandbox`, `reset_sandbox`, `promote_sandbox`, `delete_sandbox`.
 
 If they are not, instruct the user to register the server and restart the
 session — a server registered mid-session is not loaded into it:
@@ -145,22 +148,23 @@ if it does; `--proxy-uid` moves the exemption.
 
 Autonomous once preflight holds.
 
-### 1. Choose the sandbox: per-run by default
+### 1. The proxy provisions the sandbox
 
-The default needs no step at all: pass `--environment <env_id>` (from
-`VERIS_ENVIRONMENT_ID` or the user) on the command below and the proxy
-deploys a fresh sandbox of that environment for the run and deletes it when
-the run ends (`--ttl-minutes` bounds a leak if teardown never runs). A
-sandbox per run is hermetic, and for webhook tests it is also the safe
-shape — two runs sharing a sandbox would overwrite each other's callback
-registration.
+Sandbox provisioning is the proxy's job, not a separate step: `--environment
+<env_id>` (from `VERIS_ENVIRONMENT_ID` or the user) on the run command makes
+the proxy deploy a fresh sandbox of that environment, run against it, and
+delete it when the run ends (`--ttl-minutes` bounds a leak if teardown never
+runs). A sandbox per run is hermetic, and for webhook tests it is also the
+safe shape — two runs sharing a sandbox would overwrite each other's
+callback registration.
 
-Create a sandbox through MCP instead — `create_sandbox`, poll `get_sandbox`
-until `ready` (stop and read `failure_reason` on `failed`), run with
-`--sandbox <id>`, `delete_sandbox` after — when the run needs a world you
-prepared: state seeded before the tests, several suites against one world,
-or post-run inspection. Note each service's `url` and `control_url` —
-`/veris/*` control endpoints always live on `control_url`.
+The exception is a world you have to prepare before the tests — state seeded
+first, several suites against one world, post-run inspection. Provision that
+sandbox yourself through MCP (`create_sandbox`, poll `get_sandbox` until
+`ready`, stopping to read `failure_reason` on `failed`; `delete_sandbox`
+when finished) and hand it to the proxy with `--sandbox <id>`. Note each
+service's `url` and `control_url` — `/veris/*` control endpoints always live
+on `control_url`.
 
 ### 2. Run the tests through the proxy
 
