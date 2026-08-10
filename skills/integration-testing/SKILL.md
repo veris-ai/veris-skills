@@ -101,7 +101,15 @@ Check first — never reinstall over a working binary:
 veris-proxy version
 ```
 
-Only if that fails, install (ask the user first):
+The real binary prints a bare version (`v0.3.0`, a commit sha, or `dev`) and
+nothing else. Anything different — an argparse usage listing, subcommands
+like `use` / `doctor` / `sidecar-serve` — is a **deprecated Python
+prototype shadowing the real one**, and its similar-looking flags do
+different things; nothing in this skill works against it. The common case
+is a stale `uv tool` install: confirm with `command -v veris-proxy`, ask
+the user, remove it (`uv tool uninstall veris-proxy`), then install fresh.
+
+Only if no real binary is present, install (ask the user first):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veris-ai/veris-proxy/main/scripts/install.sh | sh
