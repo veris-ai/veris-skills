@@ -151,20 +151,22 @@ if it does; `--proxy-uid` moves the exemption.
 
 Autonomous once preflight holds.
 
-### 1. Create the sandbox
+### 1. Choose the sandbox: per-run by default
 
-`create_sandbox` with the environment id (from `VERIS_ENVIRONMENT_ID` or the
-user). Poll `get_sandbox` until `ready`; stop and read `failure_reason` on
-`failed`. Note each service's `url` and `control_url` — `/veris/*` control
-endpoints always live on `control_url`.
+The default needs no step at all: pass `--environment <env_id>` (from
+`VERIS_ENVIRONMENT_ID` or the user) on the command below and the proxy
+deploys a fresh sandbox of that environment for the run and deletes it when
+the run ends (`--ttl-minutes` bounds a leak if teardown never runs). A
+sandbox per run is hermetic, and for webhook tests it is also the safe
+shape — two runs sharing a sandbox would overwrite each other's callback
+registration.
 
-For a fully self-contained run, `--environment <env_id>` on the command below
-replaces this step: the proxy deploys a fresh sandbox itself and deletes it
-when the run ends (`--ttl-minutes` bounds a leak if teardown never runs).
-Prefer MCP-managed sandboxes when you need to seed state or run several
-suites against one world; prefer `--environment` for one-shot runs and for
-webhook tests, where a sandbox per run avoids two runs overwriting each
-other's callback registration.
+Create a sandbox through MCP instead — `create_sandbox`, poll `get_sandbox`
+until `ready` (stop and read `failure_reason` on `failed`), run with
+`--sandbox <id>`, `delete_sandbox` after — when the run needs a world you
+prepared: state seeded before the tests, several suites against one world,
+or post-run inspection. Note each service's `url` and `control_url` —
+`/veris/*` control endpoints always live on `control_url`.
 
 ### 2. Run the tests through the proxy
 
@@ -172,13 +174,16 @@ One command — proxy container, workload container, environment, trust,
 receipt, and teardown are all its job:
 
 ```bash
-veris-proxy run --sandbox "$SANDBOX_ID" \
+veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
   --image maven:3-eclipse-temurin-21 \
   -v "$PWD:/work" -v "$PWD/.m2:/root/.m2" -w /work \
   -e SOME_CREDENTIAL="..." \
   --require-service stripe \
   -- mvn -q verify
 ```
+
+(`--sandbox "$SANDBOX_ID"` in place of `--environment` when attaching to an
+MCP-managed sandbox.)
 
 - `-v`, `-e`, `-w` pass through to the workload container. Credentials the
   code expects still come from its environment, exactly as in production —
@@ -199,7 +204,9 @@ veris-proxy run --sandbox "$SANDBOX_ID" \
 - `--keep-proxy` leaves the proxy container up afterwards for inspection.
 
 Host-mode fallback is the same command without `--image`:
-`veris-proxy run --sandbox "$SANDBOX_ID" -- make integration`. Read its
+`veris-proxy run --sandbox "$SANDBOX_ID" -- make integration`. Host mode
+needs an MCP-managed sandbox — `--environment` (like `--expose`) lives in
+the proxy container, so the CLI refuses both without `--image`. Read its
 stderr warnings — they name exactly what the environment cannot cover. For a
 long-lived interactive session instead of per-run supervision, use
 `veris-proxy serve --sandbox <id> --write-env <file>`, source the file, and
