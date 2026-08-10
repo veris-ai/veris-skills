@@ -168,23 +168,22 @@ Autonomous once preflight holds.
 
 ### 1. The proxy provisions the sandbox
 
-Sandbox provisioning is the proxy's job, not a separate step: `--environment
-<env_id>` (from `VERIS_ENVIRONMENT_ID` or the user) on the run command makes
-the proxy deploy a fresh sandbox of that environment, run against it, and
-delete it when the run ends (`--ttl-minutes` bounds a leak if teardown never
-runs). A sandbox per run is hermetic, and for webhook tests it is also the
-safe shape — two runs sharing a sandbox would overwrite each other's
-callback registration.
+Sandbox provisioning is the proxy's job, always: `--environment <env_id>`
+(from `VERIS_ENVIRONMENT_ID` or the user) on the run command makes the proxy
+deploy a fresh sandbox of that environment, run against it, and delete it
+when the run ends (`--ttl-minutes` bounds a leak if teardown never runs). A
+sandbox per run is hermetic, and for webhook tests it is also the safe shape
+— two runs sharing a sandbox would overwrite each other's callback
+registration. Outside Phase 0's world preparation, never manage a sandbox
+yourself; `--sandbox` does not appear in this phase.
 
 State the tests always need is not a reason to leave this default: it lives
 in the environment's promoted world (Phase 0, step 6), which every per-run
-sandbox starts from. The exception is narrower — one-off state for a single
-investigation, several suites sharing one evolving world, or post-run
-inspection. Provision that sandbox yourself through MCP (`create_sandbox`,
-poll `get_sandbox` until `ready`, stopping to read `failure_reason` on
-`failed`; `delete_sandbox` when finished) and hand it to the proxy with
-`--sandbox <id>`. Note each service's `url` and `control_url` — `/veris/*`
-control endpoints always live on `control_url`.
+sandbox starts from. And the run's sandbox is still fully inspectable while
+it lives — the proxy logs `sandbox ready sandbox_id=<id>`; `get_sandbox`
+with that id yields each service's `url` and `control_url` (`/veris/*`
+control endpoints always live on `control_url`) for mid-session seeding and
+diagnosis. The lifecycle stays the proxy's.
 
 ### 2. Run the tests through the proxy
 
@@ -202,8 +201,7 @@ veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
 `<your-test-image>` and the test command are whatever Phase 0 step 5 settled
 on; the bind-mounted stock-image shape brings its mounts with it (e.g.
 `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -v "$PWD/.m2:/root/.m2"
--w /work -- mvn -q verify`). Use `--sandbox "$SANDBOX_ID"` in place of
-`--environment` when attaching to an MCP-managed sandbox.
+-w /work -- mvn -q verify`).
 
 - `-v`, `-e`, `-w` pass through to the workload container. Credentials the
   code expects still come from its environment, exactly as in production —
@@ -231,18 +229,28 @@ shape the invocation to the work:
   image's shell — `-- bash -lc 'python seed_fixtures.py && pytest
   tests/integration -x'`. Data generation, setup, and tests all run behind
   the same proxy and land on the same receipt.
-- **An iterative loop** — generate data, run a test, read
-  `{control_url}/veris/requests`, adjust, run again: hold the world in an
-  MCP-managed sandbox and invoke `veris-proxy run --sandbox "$SANDBOX_ID"
-  ... -- <next thing>` as many times as the work needs. The sandbox and all
-  its state survive between invocations; only the proxy and workload
-  containers are recreated, which costs seconds, and each invocation prints
-  its own receipt. Deploying a fresh `--environment` sandbox per iteration
-  is the expensive way to get a worse loop.
+- **An open-ended session** — generate data, run a test, read
+  `{control_url}/veris/requests`, adjust, run again, as long as you need:
+  start the run with a command that stays up (`-- sleep infinity`, or the
+  repo's dev entrypoint), leave it running in the background, and exec each
+  iteration into the workload container:
 
-Do not try to keep one workload container running and exec into it — each
-`run` invocation is cheap precisely so that the container can be disposable
-while the sandbox is not.
+  ```bash
+  veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" --image <img> ... -- sleep infinity &
+  docker exec "$(docker ps -q -f name=veris-workload-)" bash -lc 'pytest tests/integration -x'
+  # ...as many exec rounds as the work needs...
+  kill %1   # interrupt the run: sandbox deleted, receipt printed
+  ```
+
+  Everything exec'd runs behind the same kernel redirect, the sandbox and
+  its state persist for the whole session with the lifecycle still the
+  proxy's — interrupting the run tears it all down — and the final receipt
+  covers the entire session. This keeps one container up rather than one
+  command; it never means managing a sandbox yourself. If the session's
+  world grows into something every future run should start from, promote it
+  before ending the run: `promote_sandbox` with the sandbox id the run
+  logged. Promotion copies the world into the environment's default, so the
+  teardown that follows loses nothing.
 
 ### 3. Receiving webhooks
 
@@ -270,15 +278,18 @@ overwrite each other's callback URL.
   theory**, and reproduce with curl before blaming the sandbox, the proxy, or
   the code. The trace shows the wire exchange; most "sandbox bugs" are
   harness bugs.
-- `reset_sandbox` between suites for a fresh coherent world — never mid-test.
-  When ad-hoc seeding produces a world every future run should start from,
-  fold it into the environment's default with `promote_sandbox` (Phase 0,
-  step 6) instead of re-seeding each time.
+- `reset_sandbox` (with the run's logged sandbox id) between suites for a
+  fresh coherent world — never mid-test. When ad-hoc seeding produces a
+  world every future run should start from, fold it into the environment's
+  default with `promote_sandbox` on that same id before the run ends —
+  the same move as Phase 0 step 6, made from a live session.
 
 ### 5. Teardown
 
-`delete_sandbox` (or let `--environment` do it). Sandboxes are ephemeral and
-yours to break; leave nothing running that a later session could accidentally
+Nothing to do: ending the run is the teardown — the proxy deletes the
+sandbox it deployed, and `--ttl-minutes` backstops a run that dies without
+one. Just leave nothing running: an interrupted session left in the
+background is a sandbox still alive that a later session could accidentally
 trust.
 
 ## Reporting back
