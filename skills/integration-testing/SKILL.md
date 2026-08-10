@@ -33,27 +33,21 @@ proves the integration works against the sandbox*. Two rules follow.
 Do not declare the task done until the tests are green **and** the receipt
 shows the sandbox received the traffic the tests were supposed to send.
 
-## The two modes, and why container wins
+## The mode: container, always
 
-`veris-proxy run` has two tiers:
+Everything runs through **`veris-proxy run --image ...`**. The proxy runs in
+its own container and your image runs in a second one sharing its network
+namespace; an `iptables` redirect moves the traffic in the kernel, below
+every library. Nothing in the process under test has to cooperate, so it
+covers **every** runtime: Java, static Go binaries, Apache HttpClient,
+aiohttp, SDKs that pin their own CA bundle. Your image needs no capability,
+no iptables, no entrypoint change, and no particular base — distroless and
+scratch work. All requirements sit on the proxy's own container.
 
-- **Container (`run --image ...`) — the default; use it whenever docker is
-  available.** The proxy runs in its own container and your image runs in a
-  second one sharing its network namespace; an `iptables` redirect moves the
-  traffic in the kernel, below every library. Nothing in the process under
-  test has to cooperate, so it covers **every** runtime: Java, static Go
-  binaries, Apache HttpClient, aiohttp, SDKs that pin their own CA bundle.
-  Your image needs no capability, no iptables, no entrypoint change, and no
-  particular base — distroless and scratch work. All requirements sit on the
-  proxy's own container.
-- **Host (`run -- <cmd>`) — the fallback for work that cannot run in a
-  container.** Runs the command locally with proxy and CA environment
-  variables set, which is a *request*, not an enforcement: it covers only
-  libraries that honour those variables. Known gaps, all covered by the
-  container tier: Go on macOS (verifies via Security.framework), Apache
-  HttpClient `createDefault()`, `aiohttp` without `trust_env=True`, the
-  Stripe Python/Ruby SDKs (own CA bundle). `run` prints what it cannot cover
-  to stderr — read those warnings.
+(The binary also has a host tier — `run` without `--image`, environment
+variables only. Do not use it in this skill: it covers only libraries that
+honour proxy variables, and its gaps are silent. If the work truly cannot
+run in a container, stop and tell the user rather than falling back.)
 
 There is no committed proxy config to maintain. `--sandbox <id>` derives the
 whole routing — which production hostnames map to which sandbox services —
@@ -124,7 +118,8 @@ us-central1-docker.pkg.dev` (once). This goes away when the image becomes
 publicly pullable.
 
 If docker is genuinely unavailable (some CI shapes, a machine without a
-daemon), fall back to host mode and record why.
+daemon), stop and tell the user — this skill does not run without the
+container tier.
 
 ### 5. Decide how the tests run in a container
 
@@ -136,7 +131,7 @@ about the repo:
 | A Dockerfile / test image the team already uses | use it as `--image` |
 | No image, interpreted or JVM runtime | stock language image + bind-mount the repo: `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -w /work` (adjust for node/python/etc.) |
 | No image, compiled binary | build it in a stock toolchain image the same way |
-| Cannot run containerised at all | host mode, note the coverage warnings |
+| Cannot run containerised at all | stop and tell the user; do not fall back |
 
 Mount dependency caches too when they exist (`-v "$PWD/.m2:/root/.m2"`,
 node_modules, pip cache) — the proxy does not intercept package registries by
@@ -202,25 +197,14 @@ MCP-managed sandbox.)
   not an obstacle.
 - `--keep-proxy` leaves the proxy container up afterwards for inspection.
 
-Host-mode fallback is the same command without `--image`:
-`veris-proxy run --sandbox "$SANDBOX_ID" -- make integration`. Host mode
-needs an MCP-managed sandbox — `--environment` (like `--expose`) lives in
-the proxy container, so the CLI refuses both without `--image`. Read its
-stderr warnings — they name exactly what the environment cannot cover. For a
-long-lived interactive session instead of per-run supervision, use
-`veris-proxy serve --sandbox <id> --write-env <file>`, source the file, and
-run `veris-proxy check` before trusting any result — `check` fails closed
-(exit 2) on a missing proxy, a non-Veris proxy, or a proxy left over from an
-earlier run against different data.
-
 ### 3. Receiving webhooks
 
 The proxy routes your code OUT; a webhook comes back IN, and a sandbox in the
 cluster cannot reach an app on your laptop. `--expose <port>` (the port your
-app listens on) opens a public tunnel and registers it with the sandbox. In
-container mode the app shares the proxy's port space, and 8080/8081/8443 are
-the proxy's own listeners — `--expose 8080` is refused; have the app listen
-elsewhere (e.g. 3000).
+app listens on) opens a public tunnel and registers it with the sandbox. The
+app shares the proxy's port space, and 8080/8081/8443 are the proxy's own
+listeners — `--expose 8080` is refused; have the app listen elsewhere
+(e.g. 3000).
 `--require-callback <path>[:count]` (or `'*'`) asserts delivery the same way
 `--require-service` asserts egress — a webhook suite that received nothing
 must not pass. Your app is handed `VERIS_PUBLIC_URL` and registers it with
