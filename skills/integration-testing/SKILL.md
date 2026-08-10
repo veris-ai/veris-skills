@@ -118,7 +118,10 @@ build.
 
 Container mode needs `docker` on PATH and a logged-in gcloud
 (`gcloud auth login`) — the proxy's own image is pulled automatically from
-Veris's registry using that login.
+Veris's registry using that login. If the pull still answers 401, docker is
+not wired to gcloud yet: `gcloud auth configure-docker
+us-central1-docker.pkg.dev` (once). This goes away when the image becomes
+publicly pullable.
 
 If docker is genuinely unavailable (some CI shapes, a machine without a
 daemon), fall back to host mode and record why.
