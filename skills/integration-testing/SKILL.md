@@ -116,13 +116,9 @@ build.
 
 ### 4. Docker, and the proxy's runner image
 
-Container mode needs `docker` on PATH. The proxy's own image is pulled
-automatically from Veris's registry; a first run wants one-time registry
-auth:
-
-```bash
-gcloud auth configure-docker us-central1-docker.pkg.dev
-```
+Container mode needs `docker` on PATH and a logged-in gcloud
+(`gcloud auth login`) — the proxy's own image is pulled automatically from
+Veris's registry using that login.
 
 If docker is genuinely unavailable (some CI shapes, a machine without a
 daemon), fall back to host mode and record why.
