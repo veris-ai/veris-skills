@@ -25,9 +25,11 @@ proves the integration works against the sandbox*. Two rules follow.
   traffic.** A suite that quietly stopped calling its dependency, a runtime
   that ignored the interception, and a working run all print the same test
   output. The proxy prints a **receipt** — what the sandbox actually received,
-  per service — after every run, and `--require-service <name>` turns an empty
-  receipt into exit code 3. Always pass `--require-service` for each service
-  the tests are supposed to exercise, and read the receipt before drawing any
+  per service — after every run, and an `--environment` run whose receipt is
+  empty exits 3 on its own: the environment already names the services, so
+  "the suite reached the sandbox at all" is asserted for you. When the tests
+  must touch a *specific* service, sharpen with `--require-service
+  <name>[:count]`. Either way, read the receipt before drawing any
   conclusion.
 
 Do not declare the task done until the tests are green **and** the receipt
@@ -194,7 +196,6 @@ receipt, and teardown are all its job:
 veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
   --image <your-test-image> \
   -e SOME_CREDENTIAL="..." \
-  --require-service stripe \
   -- make integration
 ```
 
@@ -209,10 +210,13 @@ on; the bind-mounted stock-image shape brings its mounts with it (e.g.
   `{control_url}/veris/data`; the service's manual
   (`{control_url}/veris/manual`) names where.
 - With no command after `--`, the image's own ENTRYPOINT/CMD run untouched.
-- `--require-service <name>[:count]`, repeatable — the assertion that makes
-  an empty receipt fail. Use one per service the suite must touch.
-- Exit codes: the command's own status; `3` = a `--require-service` /
-  `--require-callback` went unmet; `4` = outcome indeterminate (treat as
+- An empty receipt already fails an `--environment` run (exit 3) — that
+  assertion is built in. `--require-service <name>[:count]`, repeatable,
+  sharpens it: use it when the suite must touch a specific service, or a
+  specific number of times; passing any takes over the verdict entirely.
+- Exit codes: the command's own status; `3` = the run never proved its
+  traffic (empty receipt, or an explicit `--require-service` /
+  `--require-callback` unmet); `4` = outcome indeterminate (treat as
   failure, not success).
 - By default only mapped hosts are rerouted; everything else (registries,
   telemetry, internal APIs) reaches its real destination. Add `--strict` for
