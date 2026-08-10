@@ -159,7 +159,15 @@ must receive webhooks — see the testing guide for tunneling). Poll
 `get_sandbox` until `ready`; stop and read `failure_reason` on `failed`.
 Note each service's `url` and `control_url`.
 
-### 2. Start the proxy
+### 2. Read the service manuals
+
+For every service returned by `get_sandbox`, read
+`{control_url}/veris/manual` fully before planning the smoke test or running
+tests. The generic testing guide owns sandbox mechanics; these manuals own
+service-specific connection details, credentials, test values, error codes,
+formats, and limitations.
+
+### 3. Start the proxy
 
 Mint a fresh canary; `.veris.toml` (including `upstream_base_url`) is found
 automatically from the repo root:
@@ -175,7 +183,7 @@ service URLs `get_sandbox` returned (scheme + host, no path — always prefer
 `--upstream <origin>` to both `serve` and `env` for this run and tell the
 user the committed value looks stale.
 
-### 3. Environment, trust, canary
+### 4. Environment, trust, canary
 
 ```bash
 eval "$(veris-proxy env --sandbox-id "$SANDBOX_ID" --canary "$CANARY")"
@@ -189,7 +197,7 @@ If the app loads its **own** keystore from disk (a mounted `keystore.p12` is
 the common shape), the JVM default truststore is never consulted — put the CA
 where the app actually looks: `veris-proxy trust --inject path/to/keystore`.
 
-### 4. Smoke test before real tests
+### 5. Smoke test before real tests
 
 Prove interception through the repo's **own client stack** — not a bare curl:
 one read and one write against a mapped service, exercising the same HTTP
@@ -199,7 +207,7 @@ proxy). Seeded sandbox data that the real vendor could not have returned is
 the cleanest possible proof. If the repo has no cheap entry point, write one
 minimal test and keep it — it is the canary's application-level twin.
 
-### 5. Run the real tests
+### 6. Run the real tests
 
 Run `[run] test_cmd`. Strict mode is the default and stays on: an unmapped
 host fails with a 502 naming the host — that is information, not an obstacle.
@@ -209,20 +217,14 @@ covers public package registries, so dependency resolution works in the same
 phase as the tests; private registries (Artifactory, corporate mirrors) get
 their own explicit entry.
 
-### 6. Set up cases, force failures, diagnose
+### 7. Use sandbox controls and diagnose failures
 
-- Seed state through `{control_url}/veris/data` / `seed`; read the service's
-  own manual at `{control_url}/veris/manual` before testing it.
-- Inject faults and latency per the testing guide to force the unhappy paths
-  — retries, duplicates, out-of-order deliveries are exactly what the
-  stateful twins exist to catch.
-- When a test fails, check `{control_url}/veris/requests` **before forming a
-  theory**, and reproduce with curl before blaming the sandbox, the proxy, or
-  the code. The trace shows the wire exchange; most "sandbox bugs" are
-  harness bugs.
-- `reset_sandbox` between suites for a fresh coherent world — never mid-test.
+Follow the generic testing guide for state setup, resets, fault and latency
+injection, time control, callbacks, and request-trace diagnosis. Follow the
+already-read service manuals for service-specific values and behavior. Do not
+duplicate or infer those rules here.
 
-### 7. Teardown
+### 8. Teardown
 
 Kill the proxy, `delete_sandbox`. Sandboxes are ephemeral and yours to break;
 leave nothing running that a later session could accidentally trust — that is
