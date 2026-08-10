@@ -49,13 +49,11 @@ variables only. Do not use it in this skill: it covers only libraries that
 honour proxy variables, and its gaps are silent. If the work truly cannot
 run in a container, stop and tell the user rather than falling back.)
 
-There is no committed proxy config to maintain. Whether the run names an
-`--environment` or a `--sandbox`, the whole routing — which production
-hostnames map to which sandbox services — is derived from the control plane
-plus a routing table measured against the real vendors and embedded in the
-binary. Do not write hosts files by hand; given an existing sandbox,
-`veris-proxy serve --sandbox <id> --print-routes` shows the derived routing
-without starting anything.
+There is no committed proxy config to maintain. The run names an
+`--environment` and the whole routing — which production hostnames map to
+which sandbox services — is derived from the control plane plus a routing
+table measured against the real vendors and embedded in the binary. Never
+write hosts files by hand.
 
 ## Phase 0 — Preflight (once per project)
 
