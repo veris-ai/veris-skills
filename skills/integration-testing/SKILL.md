@@ -89,11 +89,14 @@ claude mcp add veris --transport http "$VERIS_API_BASE/mcp" \
 
 Then stop. Do not fall back to raw HTTP against the control plane.
 
-Once connected, call `get_testing_guide` first and read it fully — seeding,
-resets, fault injection, time control, diagnosis. It is the authority on
-sandbox mechanics; this skill does not repeat it.
+### 3. Generic client testing guide
 
-### 3. veris-proxy binary
+Once the MCP server is connected, call `get_testing_guide` and read the
+returned guide fully before creating a sandbox or planning tests. It is the
+client-facing authority on sandbox mechanics: seeding, resets, fault
+injection, time control, callbacks, and diagnosis.
+
+### 4. veris-proxy binary
 
 Check first — never reinstall over a working binary:
 
@@ -111,7 +114,7 @@ The installer drops a static binary into `~/.local/bin` (no root, no package
 manager), so the same line works on a laptop, in CI, and inside a container
 build.
 
-### 4. Docker, and the proxy's runner image
+### 5. Docker, and the proxy's runner image
 
 Container mode needs `docker` on PATH and a logged-in gcloud
 (`gcloud auth login`) — the proxy's own image is pulled automatically from
@@ -124,7 +127,7 @@ If docker is genuinely unavailable (some CI shapes, a machine without a
 daemon), stop and tell the user — this skill does not run without the
 container tier.
 
-### 5. Make the tests runnable in a container
+### 6. Make the tests runnable in a container
 
 Every run uses `--image`, so the tests must run inside one — but the image
 needs nothing Veris-specific, so this is ordinary dockerization, and usually
@@ -146,23 +149,28 @@ One constraint: the image must not run as uid 14741 (the uid the kernel
 redirect exempts for the proxy itself). The CLI refuses with an explanation
 if it does; `--proxy-uid` moves the exemption.
 
-### 6. Prepare the environment's default world
+### 7. Read the service manuals and prepare the default world
 
 A fresh sandbox starts from the environment's default world, and every
 per-run `--environment` sandbox in Phase 1 inherits it — so state the tests
-always need is seeded **once, here**, not per run:
+always need is seeded **once, here**, not per run. This preflight also makes
+the service-specific contracts available before any tests are planned:
 
 1. `create_sandbox`, poll `get_sandbox` until `ready`.
-2. Read each service's manual (`{control_url}/veris/manual`) and seed through
-   `{control_url}/veris/data` / `seed`, per the testing guide.
-3. Verify the world reads back the way the tests expect.
-4. `promote_sandbox` — the sandbox's world becomes the environment's
+2. As soon as it is ready, read every service's manual
+   (`{control_url}/veris/manual`) fully before planning the smoke test or
+   integration tests. The generic testing guide owns sandbox mechanics;
+   these manuals own service-specific connection details, credentials, test
+   values, error codes, formats, and limitations.
+3. If the boot-profile world already fits the tests, delete the sandbox and
+   stop here — the default seed is designed to be usable without preparation.
+4. Otherwise, seed through `{control_url}/veris/data` / `seed` according to
+   the generic testing guide and the service manuals.
+5. Verify the world reads back the way the tests expect.
+6. `promote_sandbox` — the sandbox's world becomes the environment's
    default; every later `create_sandbox` (including the proxy's per-run
    ones) and `reset_sandbox` starts from it.
-5. `delete_sandbox`.
-
-If the boot-profile world already fits the tests, skip this — the default
-seed is designed to be usable without preparation.
+7. `delete_sandbox`.
 
 ## Phase 1 — Every run
 
@@ -180,7 +188,7 @@ registration. Outside Phase 0's world preparation, never manage a sandbox
 yourself; `--sandbox` does not appear in this phase.
 
 State the tests always need is not a reason to leave this default: it lives
-in the environment's promoted world (Phase 0, step 6), which every per-run
+in the environment's promoted world (Phase 0, step 7), which every per-run
 sandbox starts from. And the run's sandbox is still fully inspectable while
 it lives — the proxy logs `sandbox ready sandbox_id=<id>`; `get_sandbox`
 with that id yields each service's `url` and `control_url` (`/veris/*`
@@ -199,7 +207,7 @@ veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
   -- make integration
 ```
 
-`<your-test-image>` and the test command are whatever Phase 0 step 5 settled
+`<your-test-image>` and the test command are whatever Phase 0 step 6 settled
 on; the bind-mounted stock-image shape brings its mounts with it (e.g.
 `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -v "$PWD/.m2:/root/.m2"
 -w /work -- mvn -q verify`).
@@ -273,8 +281,8 @@ overwrite each other's callback URL.
 
 ### 4. Set up cases, force failures, diagnose
 
-- Seed state through `{control_url}/veris/data` / `seed`; read the service's
-  manual at `{control_url}/veris/manual` before testing it.
+- Seed state through `{control_url}/veris/data` / `seed` according to the
+  generic testing guide and the already-read service manual.
 - Inject faults and latency per the testing guide to force the unhappy paths
   — retries, duplicates, out-of-order deliveries are exactly what the
   stateful twins exist to catch.
@@ -286,7 +294,7 @@ overwrite each other's callback URL.
   fresh coherent world — never mid-test. When ad-hoc seeding produces a
   world every future run should start from, fold it into the environment's
   default with `promote_sandbox` on that same id before the run ends —
-  the same move as Phase 0 step 6, made from a live session.
+  the same move as Phase 0 step 7, made from a live session.
 
 ### 5. Teardown
 
