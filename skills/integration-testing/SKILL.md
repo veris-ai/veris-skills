@@ -217,6 +217,13 @@ on; the bind-mounted stock-image shape brings its mounts with it (e.g.
   the sandbox publishes known-good credentials readable at
   `{control_url}/veris/data`; the service's manual
   (`{control_url}/veris/manual`) names where.
+- Non-HTTP services are **handed over, not proxied**: a database service's
+  connection string arrives in the workload's environment under the exact
+  variable the platform names for it (`DATABASE_URL` for Postgres) —
+  automatically, in every tier. Do not wire it yourself, and do not treat
+  "postgres: not proxied" in the startup log as a gap: it names the variable
+  the value went to. An explicit `-e DATABASE_URL=...` of your own still
+  wins.
 - With no command after `--`, the image's own ENTRYPOINT/CMD run untouched.
 - An empty receipt already fails an `--environment` run (exit 3) — that
   assertion is built in. `--require-service <name>[:count]`, repeatable,
