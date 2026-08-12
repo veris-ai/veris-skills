@@ -34,7 +34,10 @@ veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
 ```
 
 `<your-test-image>` and the test command are whatever Phase 0 step 6 settled
-on; the bind-mounted stock-image shape brings its mounts with it (e.g.
+on — when the repo carries a `Dockerfile.veris`, that is its built image and
+the invocation reconstructed from its header comment (see the step 6 rule:
+the header is read, never paste-executed); otherwise the bind-mounted
+stock-image shape brings its mounts with it (e.g.
 `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -v "$PWD/.m2:/root/.m2"
 -w /work -- mvn -q verify`).
 

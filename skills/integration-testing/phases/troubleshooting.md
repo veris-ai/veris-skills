@@ -63,10 +63,11 @@ proxy's certificate even though routing worked.
   `~/.veris/ca/veris-ca.pem`, and mount the copy back over the original by
   adding `-v "$PWD/.veris-trust/patched.crt:/exact/container/path:ro"` to the
   run command. Keep the patched copy under the repo tree (`.veris-trust/`,
-  gitignored or committed as the team prefers). (Appending, never replacing:
-  a file holding only the Veris CA breaks the SDK's real-vendor trust for
-  every passthrough host.) It is trust data, never code — which is why both
-  forms are legitimate and the in-code alternatives below are not.
+  gitignored or committed as the team prefers) so a persisted invocation
+  stays inside the mount sources preflight step 6 allows. (Appending, never
+  replacing: a file holding only the Veris CA breaks the SDK's real-vendor
+  trust for every passthrough host.) It is trust data, never code — which is
+  why both forms are legitimate and the in-code alternatives below are not.
 - **Never reach for the in-code alternatives** — setting the SDK's CA/verify
   options in test code, monkey-patching `ssl`, or disabling verification.
   Each one modifies the code path under test, which is the line this skill
