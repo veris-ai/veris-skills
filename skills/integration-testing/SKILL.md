@@ -40,9 +40,11 @@ shows the sandbox received the traffic the tests were supposed to send.
 Everything runs through **`veris-proxy run --image ...`**. The proxy runs in
 its own container and your image runs in a second one sharing its network
 namespace; an `iptables` redirect moves the traffic in the kernel, below
-every library. Nothing in the process under test has to cooperate, so it
-covers **every** runtime: Java, static Go binaries, Apache HttpClient,
-aiohttp, SDKs that pin their own CA bundle. Your image needs no capability,
+every library. Nothing in the process under test has to cooperate, so the
+*routing* covers **every** runtime: Java, static Go binaries, Apache
+HttpClient, aiohttp. (*Trust* is still decided in-process, and an SDK that
+ships its own CA bundle decides it alone — see "SDKs that bundle their own
+CA" in Phase 1.) Your image needs no capability,
 no iptables, no entrypoint change, and no particular base — distroless and
 scratch work. All requirements sit on the proxy's own container.
 
@@ -303,7 +305,40 @@ overwrite each other's callback URL.
   default with `promote_sandbox` on that same id before the run ends —
   the same move as Phase 0 step 7, made from a live session.
 
-### 5. Teardown
+### 5. SDKs that bundle their own CA
+
+The kernel redirect moves the *traffic* below every library, but *trust* is
+still decided inside the process: an SDK that ships its own CA bundle and
+hands it straight to the TLS layer (stripe-python and stripe-ruby, older
+botocore, httplib2) reads none of the trust environment and refuses the
+proxy's certificate even though routing worked.
+
+- **The symptom**: `CERTIFICATE_VERIFY_FAILED` / `SSLError` / "unable to get
+  local issuer certificate" against a *mapped* host, in container mode, while
+  other services intercept fine. The proxy makes it loud: the run prints
+  "N TLS handshakes rejected … after the certificate was minted" for the host
+  and fails the run. That line **is** the diagnosis — it is not a sandbox
+  bug, not a routing bug, and no amount of re-running changes it.
+- **The fix is trust data, never code.** Locate the SDK's bundled CA file —
+  in the image or in the bind-mounted venv/node_modules, e.g.
+  `site-packages/stripe/data/ca-certificates.crt` — copy it out, append
+  `~/.veris/ca/veris-ca.pem`, and mount the copy back over the original by
+  adding `-v /path/to/patched.crt:/exact/container/path:ro` to the run
+  command. The SDK still loads its own bundle through its own code path; the
+  file merely holds one more root. (Appending, never replacing: a file
+  holding only the Veris CA breaks the SDK's real-vendor trust for every
+  passthrough host.)
+- **Never reach for the in-code alternatives** — setting the SDK's CA/verify
+  options in test code, monkey-patching `ssl`, or disabling verification.
+  Each one modifies the code path under test, which is the line this skill
+  never crosses.
+- **Hard pinning is a boundary, not a puzzle.** An SDK that pins SPKI hashes
+  or certificate fingerprints (OkHttp `CertificatePinner`, curl
+  `--pinnedpubkey`, aiohttp `fingerprint=`, urllib3 `assert_fingerprint`)
+  runs a second comparison after chain validation that no added root can
+  satisfy. Stop and report it to the user rather than fighting it.
+
+### 6. Teardown
 
 Nothing to do: ending the run is the teardown — the proxy deletes the
 sandbox it deployed, and `--ttl-minutes` backstops a run that dies without
