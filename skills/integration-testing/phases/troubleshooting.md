@@ -47,15 +47,26 @@ proxy's certificate even though routing worked.
   "N TLS handshakes rejected … after the certificate was minted" for the host
   and fails the run. That line **is** the diagnosis — it is not a sandbox
   bug, not a routing bug, and no amount of re-running changes it.
-- **The fix is trust data, never code.** Locate the SDK's bundled CA file —
-  in the image or in the bind-mounted venv/node_modules, e.g.
-  `site-packages/stripe/data/ca-certificates.crt` — copy it out, append
+- **The fix, for a known SDK: `--patch-bundled-cas`.** Add the flag to the
+  `veris-proxy run` command. It scans the image and your `-v` mounts for the
+  bundled CA files the common offenders ship — certifi, pip's vendored
+  certifi, botocore, stripe (Python and Ruby), httplib2 — appends the Veris
+  CA to a copy of each, and over-mounts the copy read-only over its own path.
+  The SDK keeps loading its own bundle through its own code path; the file
+  just carries one more root. The run logs one line per file it patched, and
+  a bundle it finds but cannot read fails the run loudly rather than shipping
+  it unpatched. The flag is experimental and its scan list is deliberately
+  narrow, so it is the first thing to try, not a guarantee of coverage.
+- **The fallback, for an SDK it does not know: over-mount by hand.** Same
+  move, done yourself. Locate the SDK's bundled CA file — in the image or in
+  the bind-mounted venv/node_modules — copy it out, append
   `~/.veris/ca/veris-ca.pem`, and mount the copy back over the original by
-  adding `-v /path/to/patched.crt:/exact/container/path:ro` to the run
-  command. The SDK still loads its own bundle through its own code path; the
-  file merely holds one more root. (Appending, never replacing: a file
-  holding only the Veris CA breaks the SDK's real-vendor trust for every
-  passthrough host.)
+  adding `-v "$PWD/.veris-trust/patched.crt:/exact/container/path:ro"` to the
+  run command. Keep the patched copy under the repo tree (`.veris-trust/`,
+  gitignored or committed as the team prefers). (Appending, never replacing:
+  a file holding only the Veris CA breaks the SDK's real-vendor trust for
+  every passthrough host.) It is trust data, never code — which is why both
+  forms are legitimate and the in-code alternatives below are not.
 - **Never reach for the in-code alternatives** — setting the SDK's CA/verify
   options in test code, monkey-patching `ssl`, or disabling verification.
   Each one modifies the code path under test, which is the line this skill
