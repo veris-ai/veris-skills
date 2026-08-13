@@ -15,7 +15,7 @@ and only then trust any test result.
 ## Core framing: green means nothing without proof of interception
 
 Everything in this skill exists to make one sentence true: *a passing test
-proves the integration works against the sandbox*. Two rules follow.
+proves the integration works against the sandbox*. Three rules follow.
 
 - **Never modify the code under test to point it at Veris.** No base-URL
   overrides, no injected config, no test doubles. If the code path you test is
@@ -31,9 +31,23 @@ proves the integration works against the sandbox*. Two rules follow.
   must touch a *specific* service, sharpen with `--require-service
   <name>[:count]`. Either way, read the receipt before drawing any
   conclusion.
+- **The green and the receipt must come from the same run — the run of the
+  tests that justify the change.** These halves are easy to earn separately
+  and worthless apart. Many repos' integration suites stub their vendors (a
+  built-in fake provider, recorded fixtures): such a suite passes under the
+  proxy while sending the sandbox nothing. And ad-hoc probes — a few curl
+  calls, a driver script poking the vendor API — earn a receipt while
+  verifying nothing about the change. A stub-earned green plus a probe-earned
+  receipt reads as verification and proves none: the code path that changed
+  never met the sandbox. If the tests that validate the change do not
+  themselves generate the vendor traffic, extend or write one that exercises
+  the real provider path, and run *that* under the proxy with
+  `--require-service <name>[:count]` so the verdict and the evidence are one
+  run.
 
 Do not declare the task done until the tests are green **and** the receipt
-shows the sandbox received the traffic the tests were supposed to send.
+shows the sandbox received the traffic the tests were supposed to send —
+from the same run.
 
 ## The mode: container, always
 
@@ -73,8 +87,9 @@ load-bearing, not optional:
   whenever a prerequisite might have changed.
 - **[phases/running.md](phases/running.md)** — Phase 1, every run: the one
   run command and its flags, receipts and `--require-*` assertions, exec
-  sessions for iterative work, webhooks via `--expose`, seeding and fault
-  injection, teardown. Autonomous once preflight holds.
+  sessions for iterative work, webhooks via `--expose`,
+  reproduce-red-first for bug fixes, seeding and fault injection, teardown.
+  Autonomous once preflight holds.
 - **[phases/troubleshooting.md](phases/troubleshooting.md)** — the moment
   anything fails or confuses: the evidence-first diagnosis order (receipt,
   then `/veris/requests`, then theories), empty-receipt causes, exit codes,
