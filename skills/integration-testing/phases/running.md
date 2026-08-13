@@ -115,7 +115,28 @@ the vendor through the vendor's own API, because that registration call is
 also code under test. Combine with `--environment` so concurrent runs cannot
 overwrite each other's callback URL.
 
-## 4. Set up cases, force failures
+## 4. Fixing reported behavior? Reproduce it red first
+
+When the task is a bug report about integration behavior — the code
+mishandles a vendor event, a state transition, a callback — do not start
+with the fix. Reproduce the report against the sandbox first: seed the
+state the report describes, drive the real flow end-to-end (the vendor
+event, the webhook, the state change), and watch the wrong outcome happen
+through the shipping code path. Only then change code, rerun the same flow,
+and watch it flip.
+
+The reproduction is not ceremony; it earns two things nothing else does.
+It scopes the fix by *observed* behavior instead of by the first plausible
+code path read — vendor state machines routinely have more branches than
+the report names (a failure that the vendor treats as retryable, a
+cancellation that must be terminal, an event arriving out of order), and
+the sandbox's stateful twins surface exactly those branches. And the
+red-then-green flip under the proxy, receipt attached, is the only
+evidence that the change addressed the reported behavior rather than a
+neighboring path. A fix whose validation was never seen red against the
+sandbox carries no such evidence, however green its suite.
+
+## 5. Set up cases, force failures
 
 - Seed state through `{control_url}/veris/data` / `seed` according to the
   generic testing guide and the already-read service manual.
@@ -130,7 +151,7 @@ overwrite each other's callback URL.
   default with `promote_sandbox` on that same id before the run ends —
   the same move as Phase 0 step 7, made from a live session.
 
-## 5. Teardown
+## 6. Teardown
 
 Nothing to do: ending the run is the teardown — the proxy deletes the
 sandbox it deployed, and `--ttl-minutes` backstops a run that dies without
