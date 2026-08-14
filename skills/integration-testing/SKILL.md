@@ -54,7 +54,11 @@ proves the integration works against the sandbox*. Three rules follow.
   webhook endpoint, its worker, its API route — and the flow must execute the
   changed code on its way to the vendor. If nothing observable distinguishes
   "my diff ran" from "my diff was skipped", add that observation before
-  trusting the green.
+  trusting the green: an assertion on state only the new code writes, a log
+  line only the new branch emits, or — the strongest form — the
+  red-then-green flip of [phases/running.md](phases/running.md) §4, where
+  the same flow fails before the change and passes after it, which no flow
+  that skips the change can produce.
 
 Do not declare the task done until the tests are green **and** the receipt
 shows the sandbox received the traffic the tests were supposed to send —
