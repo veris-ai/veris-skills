@@ -94,7 +94,11 @@ shape the invocation to the work:
   its state persist for the whole session with the lifecycle still the
   proxy's — interrupting the run tears it all down — and the final receipt
   covers the entire session. This keeps one container up rather than one
-  command; it never means managing a sandbox yourself. If the session's
+  command; it never means managing a sandbox yourself. Reach for this shape
+  the moment a second attempt looks plausible — wiring a repo's integration
+  suite into a container rarely works on the first try, and relaunching the
+  run command for every attempt redeploys a fresh sandbox and pays the
+  provisioning wait per iteration; a session pays it once. If the session's
   world grows into something every future run should start from, promote it
   before ending the run: `promote_sandbox` with the sandbox id the run
   logged. Promotion copies the world into the environment's default, so the
@@ -120,10 +124,20 @@ overwrite each other's callback URL.
 When the task is a bug report about integration behavior — the code
 mishandles a vendor event, a state transition, a callback — do not start
 with the fix. Reproduce the report against the sandbox first: seed the
-state the report describes, drive the real flow end-to-end (the vendor
-event, the webhook, the state change), and watch the wrong outcome happen
-through the shipping code path. Only then change code, rerun the same flow,
-and watch it flip.
+state the report describes, drive the real flow end-to-end **from the
+boundary the report names** — the application's endpoint, worker, or job,
+not the SDK call inside it — and watch the wrong outcome happen through the
+shipping code path. Only then change code, rerun the same flow, and watch
+it flip.
+
+While the reproduction is red, use it: probe what the dependency actually
+does at the exact condition the report describes — the response to the
+replayed request, the state left behind by the failed callback, the error
+code on the duplicate. The branch a fix hinges on is routinely one that
+only the live dependency reveals, and that no amount of reading the code or
+its SDK predicts. A fix designed purely from static reading lands plausible
+and wrong precisely on that branch — and its author never notices, because
+the tests they write encode the same guess the fix does.
 
 The reproduction is not ceremony; it earns two things nothing else does.
 It scopes the fix by *observed* behavior instead of by the first plausible
@@ -133,8 +147,11 @@ cancellation that must be terminal, an event arriving out of order), and
 the sandbox's stateful twins surface exactly those branches. And the
 red-then-green flip under the proxy, receipt attached, is the only
 evidence that the change addressed the reported behavior rather than a
-neighboring path. A fix whose validation was never seen red against the
-sandbox carries no such evidence, however green its suite.
+neighboring path — provided the flow ran through the changed code. A flip
+measured a layer below the change (the SDK wrapper behaves correctly) or
+beside it (a script reimplementing the handler's logic) is the same
+fiction with better props. A fix whose validation was never seen red
+against the sandbox carries no such evidence, however green its suite.
 
 ## 5. Set up cases, force failures
 
