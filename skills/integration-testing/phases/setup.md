@@ -72,7 +72,8 @@ Once connected, call `get_testing_guide` and read it fully. It is the authority
 on sandbox **state**: seeding, resets, fault injection, time control,
 callbacks, diagnosis. It is **not** the authority on transport — where it
 speaks of replacing base URLs or setting a variable to a service `url`, this
-skill supersedes it (see SKILL.md, *Precedence over the MCP testing guide*).
+skill supersedes it: transport is the proxy's, and nothing in the repo or its
+environment is edited to name a sandbox.
 
 ## 3. Make the tests runnable in a container
 
