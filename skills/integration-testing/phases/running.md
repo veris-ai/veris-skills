@@ -10,12 +10,12 @@ deploy a fresh sandbox of that environment, run against it, and delete it
 when the run ends (`--ttl-minutes` bounds a leak if teardown never runs). A
 sandbox per run is hermetic, and for webhook tests it is also the safe shape
 — two runs sharing a sandbox would overwrite each other's callback
-registration. Outside Phase 0's world preparation, never manage a sandbox
-yourself; `--sandbox` does not appear in this phase.
+registration. Outside [setup](setup.md)'s world preparation, never manage a
+sandbox yourself; `--sandbox` does not appear in this phase.
 
 State the tests always need is not a reason to leave this default: it lives
-in the environment's promoted world (Phase 0, step 7), which every per-run
-sandbox starts from. And the run's sandbox is still fully inspectable while
+in the environment's promoted world ([setup.md](setup.md) §5), which every
+per-run sandbox starts from. And the run's sandbox is still fully inspectable while
 it lives — the proxy logs `sandbox ready sandbox_id=<id>`; `get_sandbox`
 with that id yields each service's `url` and `control_url` (`/veris/*`
 control endpoints always live on `control_url`) for mid-session seeding and
@@ -33,11 +33,18 @@ veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" \
   -- make integration
 ```
 
-`<your-test-image>` and the test command are whatever Phase 0 step 6 settled
-on — when the repo carries a `Dockerfile.veris`, that is its built image and
-the invocation reconstructed from its header comment (see the step 6 rule:
-the header is read, never paste-executed); otherwise the bind-mounted
-stock-image shape brings its mounts with it (e.g.
+When [setup](setup.md) has run, that command is already written down:
+`.veris/run.sh` carries it, extra flags pass through
+(`.veris/run.sh --require-service stripe`), and `.veris/setup.json` holds the
+same facts as data. Read the script before running it — it is repo content,
+held to the same allowlist as any recorded invocation ([setup.md](setup.md)
+§4).
+
+Otherwise `<your-test-image>` and the test command are whatever
+[setup.md](setup.md) §3 settled on — when the repo carries a
+`Dockerfile.veris`, that is its built image and the invocation reconstructed
+from its header comment (the header is read, never paste-executed); otherwise
+the bind-mounted stock-image shape brings its mounts with it (e.g.
 `--image maven:3-eclipse-temurin-21 -v "$PWD:/work" -v "$PWD/.m2:/root/.m2"
 -w /work -- mvn -q verify`).
 
@@ -77,32 +84,61 @@ shape the invocation to the work:
   image's shell — `-- bash -lc 'python seed_fixtures.py && pytest
   tests/integration -x'`. Data generation, setup, and tests all run behind
   the same proxy and land on the same receipt.
-- **An open-ended session** — generate data, run a test, read
-  `{control_url}/veris/requests`, adjust, run again, as long as you need:
-  start the run with a command that stays up (`-- sleep infinity`, or the
-  repo's dev entrypoint), leave it running in the background, and exec each
-  iteration into the workload container:
+- **An open-ended session**: one run that stays up, many iterations exec'd
+  into it — see below. This is the shape for anything you will attempt more
+  than once.
 
-  ```bash
-  veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" --image <img> ... -- sleep infinity &
-  docker exec "$(docker ps -q -f name=veris-workload-)" bash -lc 'pytest tests/integration -x'
-  # ...as many exec rounds as the work needs...
-  kill %1   # interrupt the run: sandbox deleted, receipt printed
-  ```
+### Iterating: one session, not one run per attempt
 
-  Everything exec'd runs behind the same kernel redirect, the sandbox and
-  its state persist for the whole session with the lifecycle still the
-  proxy's — interrupting the run tears it all down — and the final receipt
-  covers the entire session. This keeps one container up rather than one
-  command; it never means managing a sandbox yourself. Reach for this shape
-  the moment a second attempt looks plausible — wiring a repo's integration
-  suite into a container rarely works on the first try, and relaunching the
-  run command for every attempt redeploys a fresh sandbox and pays the
-  provisioning wait per iteration; a session pays it once. If the session's
-  world grows into something every future run should start from, promote it
-  before ending the run: `promote_sandbox` with the sandbox id the run
-  logged. Promotion copies the world into the environment's default, so the
-  teardown that follows loses nothing.
+Wiring a repo's integration suite into a container rarely works on the first
+try, and each `veris-proxy run` deploys a fresh sandbox and pays the
+provisioning wait before your command starts. Ten attempts is ten
+deployments. **Reach for a session the moment a second attempt looks
+plausible** — start the run with a command that stays up, leave it in the
+background, and exec each iteration into the workload container:
+
+```bash
+veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" --image <img> ... -- sleep infinity &
+docker exec "$(docker ps -q -f name=veris-workload-)" bash -lc 'pytest tests/integration -x'
+# ...as many exec rounds as the work needs: read {control_url}/veris/requests,
+# seed, adjust the wiring, run again...
+kill %1   # interrupt the run: sandbox deleted, receipt printed
+```
+
+Everything exec'd runs behind the same kernel redirect, the sandbox and its
+state persist for the whole session with the lifecycle still the proxy's —
+interrupting the run tears it all down — and the final receipt covers the
+entire session. This keeps one *container* up rather than one *command*; it
+never means managing a sandbox yourself.
+
+If the session's world grew into something every future run should start
+from, keep it **before** ending the run:
+
+```bash
+veris-proxy promote --sandbox <the id the run logged as sandbox_id>
+```
+
+The capture is a boundary, not a snapshot: that sandbox stops answering vendor
+requests and is left frozen and scrubbed, so promote last — the teardown that
+follows loses nothing, and a promote mid-session destroys the world the
+session is using.
+
+### Keeping the world of a one-shot run
+
+A run that passes and leaves behind state every later run needs — seeded
+accounts, a completed OAuth grant, a half-finished checkout — can keep it in
+the same command:
+
+```bash
+veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" --image <img> \
+  --promote-on-success -- make integration
+```
+
+It fires only on a clean verdict with a non-empty receipt, and before
+teardown. Use it when the state is genuinely shared, not for every green run:
+the promoted world becomes the starting point for everyone, and one carrying a
+test's leftovers is worse than none. Preflight's promoted-world line tells you
+which side of that you are on.
 
 ## 3. Receiving webhooks
 
@@ -165,8 +201,8 @@ against the sandbox carries no such evidence, however green its suite.
 - `reset_sandbox` (with the run's logged sandbox id) between suites for a
   fresh coherent world — never mid-test. When ad-hoc seeding produces a
   world every future run should start from, fold it into the environment's
-  default with `promote_sandbox` on that same id before the run ends —
-  the same move as Phase 0 step 7, made from a live session.
+  default with `veris-proxy promote --sandbox <that id>` before the run ends
+  — the same move as [setup.md](setup.md) §5, made from a live session.
 
 ## 6. Teardown
 

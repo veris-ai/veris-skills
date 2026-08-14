@@ -91,15 +91,20 @@ write hosts files by hand.
 
 ## The phases
 
-Work the skill as two phases plus a failure manual, each in its own file.
+Work the skill as three phases plus a failure manual, each in its own file.
 Read the file **fully** at the point named — the details there are
 load-bearing, not optional:
 
-- **[phases/preflight.md](phases/preflight.md)** — Phase 0, once per
-  environment: seven check-first gates (API key, MCP server, testing guide,
-  proxy binary, docker, a runnable test image, service manuals + the default
-  world). Run through it before the first run against any environment, and
-  whenever a prerequisite might have changed.
+- **[phases/setup.md](phases/setup.md)** — once per repo × environment, and
+  only when something it produces is missing: install the binary, connect the
+  MCP server, make the tests runnable in a container (`Dockerfile.veris`),
+  record the exact invocation (`.veris/run.sh`, `.veris/setup.json`), and
+  decide what the environment's default world holds. It **builds**; it is
+  skipped whenever what it built is already there.
+- **[phases/preflight.md](phases/preflight.md)** — every run, about a second:
+  `veris-proxy preflight` asserts the credential, the control plane, docker,
+  the environment and the test image, and exits 2 if one is missing. It
+  **asserts**; on failure the work stops rather than routing around it.
 - **[phases/running.md](phases/running.md)** — Phase 1, every run: the one
   run command and its flags, receipts and `--require-*` assertions, exec
   sessions for iterative work, webhooks via `--expose`,
@@ -127,3 +132,6 @@ end — it goes back to Veris, and it is how the twins improve.
 
 Sandbox lifecycle operations (`create_sandbox`, `reset_sandbox`,
 `delete_sandbox`, `promote_sandbox`) are routine and yours to perform freely.
+Keeping a world is the proxy's own verb — `run --promote-on-success`, or
+`veris-proxy promote --sandbox <id>` — so it never means managing a sandbox
+yourself.
