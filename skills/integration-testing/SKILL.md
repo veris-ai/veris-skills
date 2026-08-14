@@ -45,9 +45,24 @@ proves the integration works against the sandbox*. Three rules follow.
   `--require-service <name>[:count]` so the verdict and the evidence are one
   run.
 
+- **The receipt proves traffic; it does not prove your change ran.** A run
+  can satisfy every rule above — real traffic, valid receipt, same run — while
+  exercising a layer *below* the change: a driver that invokes the vendor SDK
+  directly produces perfect evidence about the SDK and none about the handler,
+  workflow, or state machine above it that the change actually touched.
+  Verification starts at the boundary the task names — the application's
+  webhook endpoint, its worker, its API route — and the flow must execute the
+  changed code on its way to the vendor. If nothing observable distinguishes
+  "my diff ran" from "my diff was skipped", add that observation before
+  trusting the green: an assertion on state only the new code writes, a log
+  line only the new branch emits, or — the strongest form — the
+  red-then-green flip of [phases/running.md](phases/running.md) §4, where
+  the same flow fails before the change and passes after it, which no flow
+  that skips the change can produce.
+
 Do not declare the task done until the tests are green **and** the receipt
 shows the sandbox received the traffic the tests were supposed to send —
-from the same run.
+from the same run, of a flow that executed the changed code.
 
 ## The mode: container, always
 
