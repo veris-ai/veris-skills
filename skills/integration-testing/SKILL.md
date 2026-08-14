@@ -49,6 +49,27 @@ Do not declare the task done until the tests are green **and** the receipt
 shows the sandbox received the traffic the tests were supposed to send —
 from the same run.
 
+## Precedence over the MCP testing guide
+
+The Veris MCP server's `get_testing_guide` opens by telling you to *"replace
+configuration such as base URLs and credentials."* **That instruction is
+superseded here.** It describes a different, older mechanism; following it
+means the code path you test is not the code path that ships, which the rule
+above forbids. The guide also never mentions `veris-proxy`, the receipt, or
+`--require-service`, so it cannot be your source for transport.
+
+Split the two by concern:
+
+- **Transport — this skill only.** `veris-proxy run --environment`, the
+  receipt, `--require-service`, `--strict`. Never set a vendor base URL in
+  application code, config, or environment to point at a sandbox.
+- **Sandbox state — the guide (its §2 onward) and each service's
+  `{control_url}/veris/manual`.** Data, schema, faults, virtual time,
+  callbacks, redaction, Postgres. That material is authoritative and not
+  duplicated here.
+
+If the two ever conflict on how traffic reaches the sandbox, this skill wins.
+
 ## The mode: container, always
 
 Everything runs through **`veris-proxy run --image ...`**. The proxy runs in
