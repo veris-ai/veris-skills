@@ -155,7 +155,7 @@ against the sandbox carries no such evidence, however green its suite.
 
 ## 5. Set up cases, force failures
 
-- Seed state through `{control_url}/veris/data` / `seed` according to the
+- Seed state through `{control_url}/veris/data` according to the
   generic testing guide and the already-read service manual.
 - Inject faults and latency per the testing guide to force the unhappy paths
   — retries, duplicates, out-of-order deliveries are exactly what the

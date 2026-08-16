@@ -164,7 +164,7 @@ the service-specific contracts available before any tests are planned:
    values, error codes, formats, and limitations.
 3. If the boot-profile world already fits the tests, delete the sandbox and
    stop here — the default seed is designed to be usable without preparation.
-4. Otherwise, seed through `{control_url}/veris/data` / `seed` according to
+4. Otherwise, seed through `{control_url}/veris/data` according to
    the generic testing guide and the service manuals.
 5. Verify the world reads back the way the tests expect.
 6. `promote_sandbox` — the sandbox's world becomes the environment's
