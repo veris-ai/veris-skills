@@ -156,6 +156,25 @@ per-run `--environment` sandbox in Phase 1 inherits it — so state the tests
 always need is seeded **once, here**, not per run. This preflight also makes
 the service-specific contracts available before any tests are planned:
 
+**Check first, like every gate above.** `get_environment` reports a
+`baseline`: `null` means nobody has promoted a world to this environment yet,
+and a populated object means someone already has — it carries `promoted_at`,
+`revision_id` and the digest-pinned image every later sandbox now boots from.
+
+- **`baseline` is populated** → the preparation below is already done, by an
+  earlier session or by whoever set the environment up. Create a sandbox, read
+  the manuals (step 2), confirm the world reads back the way your tests expect,
+  and go to Phase 1. **Do not re-seed and do not promote again.** A promote
+  costs a full image build and replaces a default other people's runs are
+  starting from; redoing it because this session cannot remember the last one
+  is the most expensive way to change nothing.
+- **`baseline` is `null`** → work through the steps below.
+
+"Once per environment" is a real boundary, not a figure of speech, and the
+environment is the only thing that remembers. A fresh session, a fresh
+container and a fresh clone all look identical from in here, so the check is
+the only way to tell the first run from the fiftieth:
+
 1. `create_sandbox`, poll `get_sandbox` until `ready`.
 2. As soon as it is ready, read every service's manual
    (`{control_url}/veris/manual`) fully before planning the smoke test or
