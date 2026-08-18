@@ -98,8 +98,30 @@ proxy's certificate even though routing worked.
   holding only the Veris CA breaks the SDK's real-vendor trust for every
   passthrough host.) It is trust data, never code — which is why both forms
   are legitimate and the in-code alternatives below are not.
+- **A container the run did not start never receives the trust handoff.**
+  The over-mount flag and the env-file reach only the workload container the
+  proxy starts. A compose service that joins the proxy's network namespace
+  (`network_mode: "container:veris-proxy-…"`) — a nango-server, a worker, any
+  sidecar that is the process actually calling vendors — shares the kernel
+  redirect but not the trust: every vendor call dies
+  (`SELF_SIGNED_CERT_IN_CHAIN` in Node) while the workload looks healthy and
+  the receipt shows 0 requests for that service. The run fails on its own
+  (empty receipt, or the aborted-handshake verdict) and the diagnostic's
+  sibling-container clause names the fix; apply it exactly:
+  1. Find the share:
+     `docker inspect -f '{{range .Mounts}}{{if eq .Destination "/veris-share"}}{{.Source}}{{end}}{{end}}' <veris-proxy-container>`
+  2. Hand the sidecar the trust environment: `env_file: <share>/veris.env`
+     (or `--env-file`) plus a volume `<share>:/veris-share` — the env file
+     points every runtime's CA variable (`NODE_EXTRA_CA_CERTS`,
+     `SSL_CERT_FILE`, …) at `/veris-share/veris-ca.pem`.
+  The share is minted per run, so wire these through variables rather than
+  hardcoding a path; `--keep-proxy` keeps the share alive for inspection.
 - **The whole loop is deterministic — two retries, then a stop.** The
   refusal diagnostic always ends in the next action, so never explore:
+  0. First, one question: is the process that calls vendors the workload
+     container, or a sibling the run did not start? A sibling gets the
+     handoff recipe above — no amount of flag or over-mount retries can
+     reach it.
   1. It says "re-run with `--patch-bundled-cas`" → do exactly that. One
      retry.
   2. It names candidate file(s) to over-mount → apply the fallback above to
