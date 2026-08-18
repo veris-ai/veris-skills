@@ -66,16 +66,16 @@ stock-image shape brings its mounts with it (e.g.
   harness traffic completes on the same host, the receipt can look healthy
   while every SDK call dies. The flag is a no-op cost when nothing needs
   patching, and the run logs one line per file it does patch.
-- An empty receipt already fails an `--environment` run (exit 3) — that
-  assertion is built in. **Pass `--require-service <name>` for every service
-  the tests are supposed to touch, always** — not as an optional sharpening.
-  It is the one assertion that is SDK- and language-agnostic: whatever way a
-  client fails quietly (a bundled CA the proxy does not know, a stack that
-  closes without a TLS alert, a mock left active for one service while
-  another works), the missing traffic fails the run loudly instead of
-  passing on the traffic that did flow. Add `:count` when a specific volume
-  is itself the assertion; passing any `--require-*` takes over the verdict
-  entirely.
+- The loud failure modes are built in — no flags needed: an `--environment`
+  run whose receipt shows no service traffic exits 3 on its own
+  (control-plane reads count separately and cannot stand in), and a mapped
+  host whose TLS handshakes were rejected with nothing completed exits 3
+  with a diagnostic that names the next action, whatever the SDK or
+  language. `--require-service <name>[:count]` stays optional and rarely
+  needed: reach for it only when a *specific* service or call count is
+  itself the assertion — e.g. a multi-service suite where one service
+  flowing must not vouch for another that was silently never called.
+  Passing any `--require-*` takes over the verdict entirely.
 - Exit codes: the command's own status; `3` = the run never proved its
   traffic (empty receipt, or an explicit `--require-service` /
   `--require-callback` unmet); `4` = outcome indeterminate (treat as
