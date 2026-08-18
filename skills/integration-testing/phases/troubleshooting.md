@@ -8,6 +8,10 @@ are harness bugs, and the evidence to tell them apart is already recorded.
 1. **Read the receipt.** It says what the sandbox actually received, per
    service. A green suite with an empty receipt is not a pass; a red suite
    whose receipt shows the traffic arrived is a real integration finding.
+   Current proxies list `/veris/*` control-plane reads on their own line,
+   excluded from the service counts; on older proxies they fold into the
+   service counts, so a receipt can be entirely your own harness — confirm
+   the paths in `{control_url}/veris/requests` before trusting it.
 2. **Read `{control_url}/veris/requests`** for the run's sandbox — the wire
    trace of every request and response. Check it **before forming a
    theory**, and reproduce the failing exchange with curl before blaming
@@ -43,12 +47,29 @@ proxy's certificate even though routing worked.
 
 - **The symptom**: `CERTIFICATE_VERIFY_FAILED` / `SSLError` / "unable to get
   local issuer certificate" against a *mapped* host, in container mode, while
-  other services intercept fine. The proxy makes it loud: the run prints
-  "N TLS handshakes rejected … after the certificate was minted" for the host
-  and fails the run. That line **is** the diagnosis — it is not a sandbox
-  bug, not a routing bug, and no amount of re-running changes it.
+  other services intercept fine. **stripe-python hides the cause**: it wraps
+  the TLS failure as `APIConnectionError` ("Network error: A ConnectError
+  was raised" / "Could not verify Stripe's SSL certificate") — none of the
+  usual certificate strings, so treat any connection-shaped SDK error against
+  a mapped host as possibly this. The proxy prints "N TLS handshakes
+  rejected … after the certificate was minted" for the host; that line
+  **is** the diagnosis — it is not a sandbox bug, not a routing bug, and no
+  amount of re-running changes it.
+- **The absence of that line is NOT evidence against a trust failure.** On
+  proxy versions before the mixed-traffic fix, any completed request on the
+  host — including your own `/veris/*` control-plane reads, which honour
+  `SSL_CERT_FILE` and so trust the proxy fine — suppressed the diagnostic
+  *and* counted toward `--require-service`, so a run whose every SDK call
+  failed TLS could still print a healthy receipt and exit 0. Current
+  versions count `/veris/*` reads apart from service traffic and print the
+  rejection even beside completed requests. Either way: when the SDK
+  reports a connection error but the receipt shows traffic, check whether
+  that traffic is your harness (`{control_url}/veris/requests` shows the
+  paths) before concluding the network is at fault.
 - **The fix, for a known SDK: `--patch-bundled-cas`.** Add the flag to the
-  `veris-proxy run` command. It scans the image and your `-v` mounts for the
+  `veris-proxy run` command — and when the dependency set names one of the
+  offenders, add it **up front** rather than after a failure (the running
+  phase says the same). It scans the image and your `-v` mounts for the
   bundled CA files the common offenders ship — certifi, pip's vendored
   certifi, botocore, stripe (Python and Ruby), httplib2 — appends the Veris
   CA to a copy of each, and over-mounts the copy read-only over its own path.
