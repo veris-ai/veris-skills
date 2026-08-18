@@ -78,17 +78,36 @@ proxy's certificate even though routing worked.
   a bundle it finds but cannot read fails the run loudly rather than shipping
   it unpatched. The flag is experimental and its scan list is deliberately
   narrow, so it is the first thing to try, not a guarantee of coverage.
-- **The fallback, for an SDK it does not know: over-mount by hand.** Same
-  move, done yourself. Locate the SDK's bundled CA file — in the image or in
-  the bind-mounted venv/node_modules — copy it out, append
-  `~/.veris/ca/veris-ca.pem`, and mount the copy back over the original by
-  adding `-v "$PWD/.veris-trust/patched.crt:/exact/container/path:ro"` to the
-  run command. Keep the patched copy under the repo tree (`.veris-trust/`,
-  gitignored or committed as the team prefers) so a persisted invocation
-  stays inside the mount sources preflight step 6 allows. (Appending, never
-  replacing: a file holding only the Veris CA breaks the SDK's real-vendor
-  trust for every passthrough host.) It is trust data, never code — which is
-  why both forms are legitimate and the in-code alternatives below are not.
+- **The fallback, for an SDK it does not know: over-mount the file the
+  diagnostic names.** On current proxies you never search for it — when
+  `--patch-bundled-cas` was on and a client still refused, the refusal
+  message lists the CA-bundle-shaped file(s) the scan found outside its
+  known table ("CA-bundle-shaped file(s) the scan does not know: …"),
+  likeliest first. Copy that file out — from the image or the bind-mounted
+  venv/node_modules — append the published Veris CA, and mount the copy back
+  over the original by adding
+  `-v "$PWD/.veris-trust/patched.crt:/exact/container/path:ro"` to the run
+  command. The CA to append: `~/.veris/ca/veris-ca.pem` on the host tier; in
+  container mode each run's proxy mints its own, published at
+  `/veris-share/veris-ca.pem` inside the workload, so bind the file writable
+  and append it as the run's first step
+  (`-- sh -c 'cat /veris-share/veris-ca.pem >> /path; <tests>'`). Keep a
+  persisted patched copy under the repo tree (`.veris-trust/`, gitignored or
+  committed as the team prefers) so the invocation stays inside the mount
+  sources preflight step 6 allows. (Appending, never replacing: a file
+  holding only the Veris CA breaks the SDK's real-vendor trust for every
+  passthrough host.) It is trust data, never code — which is why both forms
+  are legitimate and the in-code alternatives below are not.
+- **The whole loop is deterministic — two retries, then a stop.** The
+  refusal diagnostic always ends in the next action, so never explore:
+  1. It says "re-run with `--patch-bundled-cas`" → do exactly that. One
+     retry.
+  2. It names candidate file(s) to over-mount → apply the fallback above to
+     the first named path. Second retry.
+  3. It says "likely real certificate pinning … Stop and report it" → the
+     scan found no CA-bundle-shaped file anywhere in the image or mounts; no
+     added root can satisfy SPKI/fingerprint pinning. Stop and report to the
+     user; re-running or trying other mounts only burns time.
 - **Never reach for the in-code alternatives** — setting the SDK's CA/verify
   options in test code, monkey-patching `ssl`, or disabling verification.
   Each one modifies the code path under test, which is the line this skill
