@@ -67,9 +67,15 @@ stock-image shape brings its mounts with it (e.g.
   while every SDK call dies. The flag is a no-op cost when nothing needs
   patching, and the run logs one line per file it does patch.
 - An empty receipt already fails an `--environment` run (exit 3) — that
-  assertion is built in. `--require-service <name>[:count]`, repeatable,
-  sharpens it: use it when the suite must touch a specific service, or a
-  specific number of times; passing any takes over the verdict entirely.
+  assertion is built in. **Pass `--require-service <name>` for every service
+  the tests are supposed to touch, always** — not as an optional sharpening.
+  It is the one assertion that is SDK- and language-agnostic: whatever way a
+  client fails quietly (a bundled CA the proxy does not know, a stack that
+  closes without a TLS alert, a mock left active for one service while
+  another works), the missing traffic fails the run loudly instead of
+  passing on the traffic that did flow. Add `:count` when a specific volume
+  is itself the assertion; passing any `--require-*` takes over the verdict
+  entirely.
 - Exit codes: the command's own status; `3` = the run never proved its
   traffic (empty receipt, or an explicit `--require-service` /
   `--require-callback` unmet); `4` = outcome indeterminate (treat as
