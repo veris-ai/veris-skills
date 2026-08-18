@@ -54,6 +54,18 @@ stock-image shape brings its mounts with it (e.g.
   the value went to. An explicit `-e DATABASE_URL=...` of your own still
   wins.
 - With no command after `--`, the image's own ENTRYPOINT/CMD run untouched.
+- **Add `--patch-bundled-cas` up front when the dependency set includes a
+  known bundled-CA SDK** — stripe (Python or Ruby), older botocore,
+  httplib2. Those SDKs hand their own CA file to the TLS layer and refuse
+  the proxy's certificate no matter what the environment says; the flag
+  over-mounts each known bundle with a copy that also carries the Veris CA
+  (details in
+  [troubleshooting.md](troubleshooting.md#sdks-that-bundle-their-own-ca)).
+  Do not wait for the failure: it can be quiet — stripe-python surfaces it
+  as a generic `APIConnectionError` network error, and if the run's own
+  harness traffic completes on the same host, the receipt can look healthy
+  while every SDK call dies. The flag is a no-op cost when nothing needs
+  patching, and the run logs one line per file it does patch.
 - An empty receipt already fails an `--environment` run (exit 3) — that
   assertion is built in. `--require-service <name>[:count]`, repeatable,
   sharpens it: use it when the suite must touch a specific service, or a
