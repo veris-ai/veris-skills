@@ -89,6 +89,16 @@ which sandbox services — is derived from the control plane plus a routing
 table measured against the real vendors and embedded in the binary. Never
 write hosts files by hand.
 
+## Not this skill
+
+This one verifies a change. It does not choose one. If the design is still
+open, or the task rests on a claim about the vendor you have not seen it make
+— *"the API has no X"*, *"it always returns Y"* — use
+`discovering-vendor-behavior` first. Arriving here with the design already
+fixed leaves the sandbox only one question to answer: whether your code works.
+It will answer that, correctly, while the assumption underneath it goes
+unexamined.
+
 ## The phases
 
 Work the skill as two phases plus a failure manual, each in its own file.
