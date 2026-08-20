@@ -35,16 +35,37 @@ Issues, comments and docstrings carry sentences like *"the API has no X"*,
 made, often without checking. One probe settles it. Inheriting it wrong
 constrains the whole change.
 
+## Where this sits
+
+    learn the dependency  →  choose the design  →  write it  →  verify it
+    ^^^^^^^^^^^^^^^^^^^^                                        ^^^^^^^^^
+    this skill                                        integration-testing
+
+The first step is the one that gets skipped, because nothing forces it and the
+code compiles without it.
+
 ## The ladder — stop at the first rung that answers
 
-| rung | cost | what it answers |
-|---|---|---|
-| `GET {service_url}/veris/manual` | seconds | the service's own contract notes: write safety, API version, credentials, failure injection |
-| `GET {service_url}/veris/schema` | seconds | what the vendor stores, per table and column, in its own words |
-| a probe against a sandbox | minutes | everything else — send the request twice and read what came back |
+Everything below is served **by the service**, so a sandbox has to exist
+first. That is three calls and a poll, and it is the whole reason this gets
+put off until "verification time" — do it now anyway, at the start, where the
+answers can still change the design:
+
+    get_environment → create_sandbox → get_sandbox (poll to ready)
+
+`get_sandbox` returns each service's `url` and `control_url`. Use
+`control_url` for every `/veris/*` path.
+
+| rung | what it answers |
+|---|---|
+| `GET {control_url}/veris/manual` | the vendor's own contract: what makes a repeated write safe, API version, credentials, which errors you can inject |
+| `GET {control_url}/veris/schema` | what the vendor stores, table by table and column by column, each in its own words — including the rule that governs a table |
+| a probe against that sandbox | everything else: send the request twice, lose a response, exhaust the page, and read what came back |
 
 A probe beats every document, including the vendor's. Documents describe
-intent; the sandbox is the behaviour.
+intent; the sandbox is the behaviour. But read the two documents first — they
+are one HTTP call each against a sandbox you now have, and they routinely
+answer the question outright.
 
 ## Then carry it
 
