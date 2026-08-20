@@ -171,3 +171,31 @@ the service-specific contracts available before any tests are planned:
    default; every later `create_sandbox` (including the proxy's per-run
    ones) and `reset_sandbox` starts from it.
 7. `delete_sandbox`.
+
+**One default, or several saved worlds.** Promote pins *the* default, so it
+fits state every suite needs. When suites need **different** starting worlds —
+an empty account and a fully-populated one, a trial and an expired trial —
+promoting one of them is wrong: it silently changes the world every other
+suite starts from. Save each as a **snapshot** instead and boot the one a run
+needs:
+
+```sh
+# after seeding + verifying a world, from the same live sandbox
+curl -X POST "$API/v1/environments/$ENV_ID/snapshots" \
+  -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"sandbox_id":"'"$SANDBOX_ID"'","name":"expired-trial"}'
+
+curl -s "$API/v1/environments/$ENV_ID/snapshots" -H "X-API-Key: $KEY"   # list
+```
+
+Many snapshots per environment; the environment's default boot is unchanged.
+`create_sandbox` then takes an optional `snapshot_id` (it is on the MCP tool),
+and an explicit snapshot beats the environment's baseline pin. Snapshot
+**management** — create, list, delete — is HTTP-only, like environment
+management; only the boot side is on MCP.
+
+Two behaviours to expect. A sandbox booted from a snapshot **refuses
+`reset_sandbox` with 409** (reseeding profiles would silently replace that
+world) — delete and recreate it instead. And a snapshot cannot be deleted
+while a sandbox booted from it is still alive; that delete answers 409 until
+the sandbox is gone.
