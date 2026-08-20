@@ -184,7 +184,13 @@ against the sandbox carries no such evidence, however green its suite.
   fresh coherent world — never mid-test. When ad-hoc seeding produces a
   world every future run should start from, fold it into the environment's
   default with `promote_sandbox` on that same id before the run ends —
-  the same move as Phase 0 step 7, made from a live session.
+  the same move as Phase 0 step 7, made from a live session. When it is a
+  world only *some* runs want, save it as a named **snapshot** instead
+  (Phase 0 step 7) and boot it with `create_sandbox`'s `snapshot_id`;
+  promoting it would change what every other suite starts from.
+- A sandbox booted from a snapshot (or of a promoted environment) **refuses
+  `reset_sandbox` with 409** — its world is an image, and reseeding profiles
+  would silently replace it. Delete and recreate to get back to that world.
 
 ## 6. Teardown
 
