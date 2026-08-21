@@ -1,0 +1,106 @@
+# SDKs that bundle their own CA
+
+The kernel redirect moves the *traffic* below every library, but *trust* is
+still decided inside the process: an SDK that ships its own CA bundle and
+hands it straight to the TLS layer (stripe-python and stripe-ruby, older
+botocore, httplib2) reads none of the trust environment and refuses the
+proxy's certificate even though routing worked.
+
+- **Add `--patch-bundled-cas` up front when the dependency set includes a
+  known bundled-CA SDK.** Do not wait for the failure: it can be quiet —
+  stripe-python surfaces it as a generic `APIConnectionError` network error,
+  and if the run's own harness traffic completes on the same host, the
+  receipt can look healthy while every SDK call dies. The flag is a no-op
+  cost when nothing needs patching, and the run logs one line per file it
+  does patch.
+- **The symptom**: `CERTIFICATE_VERIFY_FAILED` / `SSLError` / "unable to get
+  local issuer certificate" against a *mapped* host, in container mode, while
+  other services intercept fine. **stripe-python hides the cause**: it wraps
+  the TLS failure as `APIConnectionError` ("Network error: A ConnectError
+  was raised" / "Could not verify Stripe's SSL certificate") — none of the
+  usual certificate strings, so treat any connection-shaped SDK error against
+  a mapped host as possibly this. The proxy prints "N TLS handshakes
+  rejected … after the certificate was minted" for the host; that line
+  **is** the diagnosis — it is not a sandbox bug, not a routing bug, and no
+  amount of re-running changes it.
+- **The absence of that line is NOT evidence against a trust failure.** On
+  proxy versions before the mixed-traffic fix, any completed request on the
+  host — including your own `/veris/*` control-plane reads, which honour
+  `SSL_CERT_FILE` and so trust the proxy fine — suppressed the diagnostic
+  *and* counted toward `--require-service`, so a run whose every SDK call
+  failed TLS could still print a healthy receipt and exit 0. Current
+  versions count `/veris/*` reads apart from service traffic and print the
+  rejection even beside completed requests. Either way: when the SDK
+  reports a connection error but the receipt shows traffic, check whether
+  that traffic is your harness (`{control_url}/veris/requests` shows the
+  paths) before concluding the network is at fault.
+- **The fix, for a known SDK: `--patch-bundled-cas`.** It scans the image and
+  your `-v` mounts for the bundled CA files the common offenders ship —
+  certifi, pip's vendored certifi, botocore, stripe (Python and Ruby),
+  httplib2 — appends the Veris CA to a copy of each, and over-mounts the copy
+  read-only over its own path. The SDK keeps loading its own bundle through
+  its own code path; the file just carries one more root. A bundle it finds
+  but cannot read fails the run loudly rather than shipping it unpatched. The
+  flag is experimental and its scan list is deliberately narrow, so it is the
+  first thing to try, not a guarantee of coverage.
+- **The fallback, for an SDK it does not know: over-mount the file the
+  diagnostic names.** On current proxies you never search for it — when
+  `--patch-bundled-cas` was on and a client still refused, the refusal
+  message lists the CA-bundle-shaped file(s) the scan found outside its
+  known table ("CA-bundle-shaped file(s) the scan does not know: …"),
+  likeliest first. Copy that file out — from the image or the bind-mounted
+  venv/node_modules — append the published Veris CA, and mount the copy back
+  over the original by adding
+  `-v "$PWD/.veris-trust/patched.crt:/exact/container/path:ro"` to the run
+  command. The CA to append: `~/.veris/ca/veris-ca.pem` on the host tier; in
+  container mode each run's proxy mints its own, published at
+  `/veris-share/veris-ca.pem` inside the workload, so bind the file writable
+  and append it as the run's first step
+  (`-- sh -c 'cat /veris-share/veris-ca.pem >> /path; <tests>'`). Keep a
+  persisted patched copy under the repo tree (`.veris-trust/`, gitignored or
+  committed as the team prefers) so the invocation stays inside the mount
+  sources setup allows. (Appending, never replacing: a file holding only the
+  Veris CA breaks the SDK's real-vendor trust for every passthrough host.) It
+  is trust data, never code — which is why both forms are legitimate and the
+  in-code alternatives below are not.
+- **A container the run did not start never receives the trust handoff.**
+  The over-mount flag and the env-file reach only the workload container the
+  proxy starts. A compose service that joins the proxy's network namespace
+  (`network_mode: "container:veris-proxy-…"`) — a nango-server, a worker, any
+  sidecar that is the process actually calling vendors — shares the kernel
+  redirect but not the trust: every vendor call dies
+  (`SELF_SIGNED_CERT_IN_CHAIN` in Node) while the workload looks healthy and
+  the receipt shows 0 requests for that service. The run fails on its own
+  (empty receipt, or the aborted-handshake verdict) and the diagnostic's
+  sibling-container clause names the fix; apply it exactly:
+  1. Find the share:
+     `docker inspect -f '{{range .Mounts}}{{if eq .Destination "/veris-share"}}{{.Source}}{{end}}{{end}}' <veris-proxy-container>`
+  2. Hand the sidecar the trust environment: `env_file: <share>/veris.env`
+     (or `--env-file`) plus a volume `<share>:/veris-share` — the env file
+     points every runtime's CA variable (`NODE_EXTRA_CA_CERTS`,
+     `SSL_CERT_FILE`, …) at `/veris-share/veris-ca.pem`.
+  The share is minted per run, so wire these through variables rather than
+  hardcoding a path; `--keep-proxy` keeps the share alive for inspection.
+- **The whole loop is deterministic — two retries, then a stop.** The
+  refusal diagnostic always ends in the next action, so never explore:
+  0. First, one question: is the process that calls vendors the workload
+     container, or a sibling the run did not start? A sibling gets the
+     handoff recipe above — no amount of flag or over-mount retries can
+     reach it.
+  1. It says "re-run with `--patch-bundled-cas`" → do exactly that. One
+     retry.
+  2. It names candidate file(s) to over-mount → apply the fallback above to
+     the first named path. Second retry.
+  3. It says "likely real certificate pinning … Stop and report it" → the
+     scan found no CA-bundle-shaped file anywhere in the image or mounts; no
+     added root can satisfy SPKI/fingerprint pinning. Stop and report to the
+     user; re-running or trying other mounts only burns time.
+- **Never reach for the in-code alternatives** — setting the SDK's CA/verify
+  options in test code, monkey-patching `ssl`, or disabling verification.
+  Each one modifies the code path under test, which is the line this skill
+  never crosses.
+- **Hard pinning is a boundary, not a puzzle.** An SDK that pins SPKI hashes
+  or certificate fingerprints (OkHttp `CertificatePinner`, curl
+  `--pinnedpubkey`, aiohttp `fingerprint=`, urllib3 `assert_fingerprint`)
+  runs a second comparison after chain validation that no added root can
+  satisfy. Stop and report it to the user rather than fighting it.
