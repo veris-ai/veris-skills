@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Asserts the preconditions for `veris-proxy run`, one per line, and exits 2
+# at the first one that fails. Written by the setting-up-veris skill; run it
+# before every session rather than trusting that setup still holds.
+#
+#   scripts/preflight.sh            # uses VERIS_ENVIRONMENT_ID and .veris/setup.json
+#   scripts/preflight.sh <env-id>   # checks a different environment
+set -u
+
+fail() { printf 'preflight: %s — %s\n' "$1" "$2" >&2; exit 2; }
+ok()   { printf 'preflight: %-12s ok%s\n' "$1" "${2:+ ($2)}"; }
+
+base="${VERIS_API_BASE:-https://api.veris.ai}"
+base="${base%/}"
+
+[ -n "${VERIS_API_KEY:-}" ] \
+  || fail credential "export VERIS_API_KEY (if the veris MCP server is registered, it is that server's X-API-Key header value)"
+ok credential
+
+command -v veris-proxy >/dev/null 2>&1 && veris-proxy version >/dev/null 2>&1 \
+  || fail binary "veris-proxy is not on PATH or does not run; ask the user, then: curl -fsSL https://raw.githubusercontent.com/veris-ai/veris-proxy/main/scripts/install.sh | sh  (a static binary into ~/.local/bin, no root)"
+ok binary "$(veris-proxy version 2>/dev/null | head -1)"
+
+docker version >/dev/null 2>&1 \
+  || fail docker "no docker daemon answers; start it. The proxy image is pulled with a logged-in gcloud (gcloud auth login; on 401: gcloud auth configure-docker us-central1-docker.pkg.dev). No daemon on this machine: stop and tell the user"
+ok docker
+
+env_id="${1:-${VERIS_ENVIRONMENT_ID:-}}"
+[ -n "$env_id" ] \
+  || fail environment "export VERIS_ENVIRONMENT_ID or pass an environment id"
+body="$(curl -sS -m 20 -H "X-API-Key: $VERIS_API_KEY" "$base/v1/environments/$env_id")" \
+  || fail environment "control plane $base unreachable"
+case "$body" in
+  *'"id"'*) ;;
+  *) fail environment "control plane refused the key or does not know $env_id: ${body:0:120}" ;;
+esac
+case "$body" in
+  *'"baseline"'*'"image"'*) ok environment "$env_id, promoted world" ;;
+  *) ok environment "$env_id, no promoted world — every sandbox boots the stock profile" ;;
+esac
+
+if [ -f .veris/setup.json ]; then
+  image="$(sed -n 's/.*"image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .veris/setup.json | head -1)"
+  dockerfile="$(sed -n 's/.*"dockerfile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .veris/setup.json | head -1)"
+  # A stock image is pulled by the run itself; only a tag built from a
+  # recorded Dockerfile has to exist locally before the run can start.
+  if [ -n "$image" ] && [ -n "$dockerfile" ]; then
+    docker image inspect "$image" >/dev/null 2>&1 \
+      || fail image "$image (built from $dockerfile, per .veris/setup.json) is not built; docker build -f $dockerfile -t $image ."
+    ok image "$image"
+  elif [ -n "$image" ]; then
+    ok image "$image (stock image; the run pulls it)"
+  fi
+fi

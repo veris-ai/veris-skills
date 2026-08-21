@@ -7,7 +7,12 @@ Skills for coding agents that use the [Veris AI](https://veris.ai) simulation pl
 | Skill | What it does |
 | --- | --- |
 | [`agent-integration`](skills/agent-integration) | Integrate a raw customer agent repo with Veris end-to-end: `.veris/veris.yaml`, `Dockerfile.sandbox`, env vars, and `veris env push`. |
-| [`integration-testing`](skills/integration-testing) | Run a repo's integration tests against a Veris dependency sandbox: veris-proxy runs the tests in a container beside a kernel-level interception proxy (any runtime, image unmodified), and a per-service receipt proves the sandbox actually received the traffic. |
+| [`setting-up-veris`](skills/setting-up-veris) | Wire a repository to a Veris dependency sandbox once: a preflight script, a test image, the exact run command in `.veris/run.sh`, and a smoke run whose receipt proves the wiring. |
+| [`discovering-vendor-behavior`](skills/discovering-vendor-behavior) | Measure what a dependency actually does before designing around it: the service's own contract notes, the schema, probes, the failure the task describes made to happen, and a ledger of what was measured. For the design phase, before the code exists. |
+| [`integration-testing`](skills/integration-testing) | Exercise a change against a Veris dependency sandbox through veris-proxy with the code unmodified: arrange, arm a fault, drive the boundary the task names, read back what the twin recorded, and flip red to green — with a receipt proving the sandbox received the traffic. |
+
+The three dependency-sandbox skills are one arc — set up once, discover before
+designing, test the change — and hand off to each other by name.
 
 More coming soon (scenario creation, running simulations, …).
 
