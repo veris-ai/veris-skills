@@ -18,11 +18,11 @@ base="${base%/}"
 ok credential
 
 command -v veris-proxy >/dev/null 2>&1 && veris-proxy version >/dev/null 2>&1 \
-  || fail binary "veris-proxy is not on PATH or does not run"
+  || fail binary "veris-proxy is not on PATH or does not run; ask the user, then: curl -fsSL https://raw.githubusercontent.com/veris-ai/veris-proxy/main/scripts/install.sh | sh  (a static binary into ~/.local/bin, no root)"
 ok binary "$(veris-proxy version 2>/dev/null | head -1)"
 
 docker version >/dev/null 2>&1 \
-  || fail docker "no docker daemon answers; the container tier is the only tier this skill uses"
+  || fail docker "no docker daemon answers; start it. The proxy image is pulled with a logged-in gcloud (gcloud auth login; on 401: gcloud auth configure-docker us-central1-docker.pkg.dev). No daemon on this machine: stop and tell the user"
 ok docker
 
 env_id="${1:-${VERIS_ENVIRONMENT_ID:-}}"
