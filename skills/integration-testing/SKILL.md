@@ -1,141 +1,129 @@
 ---
 name: integration-testing
-description: Runs a repository's integration tests against a Veris dependency sandbox through veris-proxy, with the code under test unmodified - the run command from .veris/run.sh, one exec session for iteration, the failure reproduced red before the change and green after it, seeding and fault injection, webhooks via --expose, and a receipt proving the sandbox received the traffic. Use when a change to code that calls an external service needs to be exercised, or a reported integration behaviour needs reproducing.
+description: Run a repo's integration tests against a Veris dependency sandbox instead of real vendors, with veris-proxy rerouting the code's outbound HTTP(S) at the kernel level. Verifies prerequisites (API key, Veris MCP server, veris-proxy binary, docker), then runs the tests in a container beside the proxy with one command that deploys a per-run sandbox and proves the sandbox actually received the traffic before trusting any green. Use when code that talks to external services needs its integration behavior verified before a change is called done.
 ---
 
-Run this repository's integration tests against a Veris dependency sandbox.
+Run this repo's integration tests against a Veris dependency sandbox.
 
 The sandbox is a set of stateful, contract-accurate twins of the services this
 code depends on. The code under test is **never modified and never told**: it
-keeps its production hostnames, credentials and client stack, and
+keeps its production hostnames, credentials, and client stack, and
 `veris-proxy` reroutes its outbound HTTP(S) into the sandbox from outside the
-process. Your job is to make the failure the task describes happen, change the
-code, watch it stop happening — and be able to prove all three.
+process. Your job is to stand that pipeline up, prove it actually intercepted,
+and only then trust any test result.
 
-## Where you are
+## Core framing: green means nothing without proof of interception
 
-- No `.veris/run.sh`, or `setting-up-veris`'s `scripts/preflight.sh` fails →
-  that skill first. Transport is never improvised here.
-- The design is still open, or the task rests on a claim about the vendor you
-  have not seen it make — *"the API has no X"*, *"it always returns Y"* →
-  `discovering-vendor-behavior` first. Arriving with the design fixed leaves
-  the sandbox one question: whether your code works. It will answer that,
-  correctly, while the assumption underneath goes unexamined.
-- Otherwise: run.
+Everything in this skill exists to make one sentence true: *a passing test
+proves the integration works against the sandbox*. Three rules follow.
 
-## The run
+- **Never modify the code under test to point it at Veris.** No base-URL
+  overrides, no injected config, no test doubles. If the code path you test is
+  not the code path that ships, the green is fiction. The proxy is the whole
+  mechanism.
+- **Never report tests as passing without evidence the sandbox received the
+  traffic.** A suite that quietly stopped calling its dependency, a runtime
+  that ignored the interception, and a working run all print the same test
+  output. The proxy prints a **receipt** — what the sandbox actually received,
+  per service — after every run, and an `--environment` run whose receipt is
+  empty exits 3 on its own: the environment already names the services, so
+  "the suite reached the sandbox at all" is asserted for you. When the tests
+  must touch a *specific* service, sharpen with `--require-service
+  <name>[:count]`. Either way, read the receipt before drawing any
+  conclusion.
+- **The green and the receipt must come from the same run — the run of the
+  tests that justify the change.** These halves are easy to earn separately
+  and worthless apart. Many repos' integration suites stub their vendors (a
+  built-in fake provider, recorded fixtures): such a suite passes under the
+  proxy while sending the sandbox nothing. And ad-hoc probes — a few curl
+  calls, a driver script poking the vendor API — earn a receipt while
+  verifying nothing about the change. A stub-earned green plus a probe-earned
+  receipt reads as verification and proves none: the code path that changed
+  never met the sandbox. If the tests that validate the change do not
+  themselves generate the vendor traffic, extend or write one that exercises
+  the real provider path, and run *that* under the proxy with
+  `--require-service <name>[:count]` so the verdict and the evidence are one
+  run.
 
-One command — proxy container, workload container, environment, trust,
-receipt and teardown are all its job. `.veris/run.sh` carries it: flags before
-`--` pass through, a command after `--` replaces its default. With no
-`run.sh` the shape is:
+- **The receipt proves traffic; it does not prove your change ran.** A run
+  can satisfy every rule above — real traffic, valid receipt, same run — while
+  exercising a layer *below* the change: a driver that invokes the vendor SDK
+  directly produces perfect evidence about the SDK and none about the handler,
+  workflow, or state machine above it that the change actually touched.
+  Verification starts at the boundary the task names — the application's
+  webhook endpoint, its worker, its API route — and the flow must execute the
+  changed code on its way to the vendor. If nothing observable distinguishes
+  "my diff ran" from "my diff was skipped", add that observation before
+  trusting the green: an assertion on state only the new code writes, a log
+  line only the new branch emits, or — the strongest form — the
+  red-then-green flip of [phases/running.md](phases/running.md) §4, where
+  the same flow fails before the change and passes after it, which no flow
+  that skips the change can produce.
 
-```bash
-veris-proxy run --environment "$VERIS_ENVIRONMENT_ID" --image <test-image> \
-  -v "$PWD:/work" -w /work -- <test command>
-```
+Do not declare the task done until the tests are green **and** the receipt
+shows the sandbox received the traffic the tests were supposed to send —
+from the same run, of a flow that executed the changed code.
 
-The proxy deploys a fresh sandbox of the environment, runs against it, prints
-a **receipt** — what the sandbox received, per service — and deletes the
-sandbox. It logs `sandbox ready sandbox_id=<id>`; `get_sandbox` with that id
-gives each service's `control_url` for seeding and reading back while the run
-lives. Never manage a sandbox of your own for a run.
+## The mode: container, always
 
-- An `--environment` run whose receipt shows no service traffic exits 3 on
-  its own (control-plane reads count separately and cannot stand in). A
-  mapped host whose TLS handshakes were all rejected also exits 3, with a
-  diagnostic that names the next action. `4` is indeterminate — a failure,
-  never a pass.
-- `--require-service <name>[:count]` is optional and rarely needed: only when
-  a *specific* service or call count is itself the assertion. Passing any
-  `--require-*` takes over the verdict.
-- `--strict` fails the run on any unmapped host with a 502 naming it — use
-  it when the claim is "the code reached nothing but the sandbox".
-- `--patch-bundled-cas` goes on **up front** when the dependency set includes
-  stripe (Python or Ruby), older botocore or httplib2; those SDKs refuse the
-  proxy's certificate quietly. [reference/trust.md](reference/trust.md).
-- `--keep-proxy` leaves the proxy container up for inspection.
+Everything runs through **`veris-proxy run --image ...`**. The proxy runs in
+its own container and your image runs in a second one sharing its network
+namespace; an `iptables` redirect moves the traffic in the kernel, below
+every library. Nothing in the process under test has to cooperate, so the
+*routing* covers **every** runtime: Java, static Go binaries, Apache
+HttpClient, aiohttp. (*Trust* is still decided in-process, and an SDK that
+ships its own CA bundle decides it alone — see
+[phases/troubleshooting.md](phases/troubleshooting.md#sdks-that-bundle-their-own-ca).)
+Your image needs no capability, no iptables, no entrypoint change, and no
+particular base — distroless and scratch work. All requirements sit on the
+proxy's own container.
 
-## The loop
+(The binary also has a host tier — `run` without `--image`, environment
+variables only. Do not use it in this skill: it covers only libraries that
+honour proxy variables, and its gaps are silent. If the work truly cannot
+run in a container, stop and tell the user rather than falling back.)
 
-The twin is a simulator, not a mock: it can put the vendor into the state the
-task describes and show you what it recorded afterwards. Every run is one
-pass of this loop, and a bug-shaped task starts with a pass that is **red**:
+There is no committed proxy config to maintain. The run names an
+`--environment` and the whole routing — which production hostnames map to
+which sandbox services — is derived from the control plane plus a routing
+table measured against the real vendors and embedded in the binary. Never
+write hosts files by hand.
 
-1. **Arrange** — seed exactly the rows the case needs through
-   `POST {control_url}/veris/data`, in the shapes `/veris/schema` and the
-   manual name. Discover ids from sandbox state; never guess them.
-2. **Arm** — the fault for this case: the lost response (`"phase":"after"`),
-   the throttle (429 with `Retry-After`, `"remaining":2`), the vanished
-   record, the latency. The manual lists the codes you can force; the testing
-   guide §4 has the row format; `discovering-vendor-behavior` has the table.
-3. **Drive** — the flow from the boundary the task names: the application's
-   endpoint, worker, job, or tool handler — not the SDK call inside it — with
-   **the call the report describes, unchanged**. A retry that only goes green
-   because the caller now passes something new has changed the caller, not
-   fixed the code. Use the smallest test that crosses the changed boundary
-   and calls the dependency.
-4. **Read back** — the receipt; `GET {control_url}/veris/requests` for what
-   the client actually sent; `GET {control_url}/veris/data?entity_type=` for
-   what the vendor stored. On a failure, read these *before* forming a theory
-   ([reference/troubleshooting.md](reference/troubleshooting.md)).
-5. **Flip** — the same pass, red before the change and green after it.
+## The phases
 
-While the reproduction is red, use it. Probe what the dependency does at the
-exact condition the report describes — the response to the replayed request,
-the state left by the failed callback, the code on the duplicate. The branch a
-fix hinges on is routinely one that only the live dependency reveals, and a
-fix designed from static reading lands plausible and wrong on precisely that
-branch; its author never notices, because the tests they write encode the same
-guess the fix does.
+Work the skill as two phases plus a failure manual, each in its own file.
+Read the file **fully** at the point named — the details there are
+load-bearing, not optional:
 
-**Iterate in one session.** Wiring a suite into a container rarely works first
-try, and each relaunch redeploys a sandbox. Start the run with `.veris/run.sh -- sleep
-infinity &`, then `docker exec "$(docker ps -q -f name=veris-workload-)" bash
--lc '<one pass>'` as many times as the work needs; `kill %1` ends it and
-prints the receipt for the whole session. Several steps in one interception
-also chain through the image's shell: `.veris/run.sh -- bash -lc 'python
-seed.py && pytest tests/integration -x'`.
-
-## Done means
-
-- the receipt names the service the tests were supposed to reach;
-- that receipt and the green come from **the same run** — a stub-earned
-  green and a probe-earned receipt prove nothing together;
-- that run executed the changed code on its way to the vendor — an assertion
-  on state only the new code writes, a log line only the new branch emits, or
-  the red-then-green flip itself;
-- nothing in the repo or its environment was pointed at a sandbox.
-
-Write the verification section of the change description from
-[reference/evidence.md](reference/evidence.md). What was measured goes under
-*verified*; what was not goes under *assuming rather than verifying*, and
-the `.veris/MEASUREMENTS.md` ledger, when there is one, is read against the
-design before the section is written.
-
-## Reference, when the case calls for it
-
-- [reference/troubleshooting.md](reference/troubleshooting.md) — receipt,
-  then `/veris/requests`, then theories; the empty receipt; exit codes.
-- [reference/trust.md](reference/trust.md) — SDKs that bundle their own CA,
-  the sidecar that never got the handoff, the two-retry loop.
-- [reference/worlds.md](reference/worlds.md) — reset, promote, snapshots;
-  keeping a world a session built.
-- [reference/webhooks.md](reference/webhooks.md) — `--expose`,
-  `--require-callback`.
-- [reference/evidence.md](reference/evidence.md) — the change-description
-  template.
+- **[phases/preflight.md](phases/preflight.md)** — Phase 0, once per
+  environment: seven check-first gates (API key, MCP server, testing guide,
+  proxy binary, docker, a runnable test image, service manuals + the default
+  world). Run through it before the first run against any environment, and
+  whenever a prerequisite might have changed.
+- **[phases/running.md](phases/running.md)** — Phase 1, every run: the one
+  run command and its flags, receipts and `--require-*` assertions, exec
+  sessions for iterative work, webhooks via `--expose`,
+  reproduce-red-first for bug fixes, seeding and fault injection, teardown.
+  Autonomous once preflight holds.
+- **[phases/troubleshooting.md](phases/troubleshooting.md)** — the moment
+  anything fails or confuses: the evidence-first diagnosis order (receipt,
+  then `/veris/requests`, then theories), empty-receipt causes, exit codes,
+  and TLS trust failures from SDKs that bundle their own CA. Read it
+  **before forming a theory**, not after one collapses.
 
 ## Reporting back
 
 Keep a running record of anything about the **sandbox** that confused or
-blocked you: gaps in its documentation, behaviour that contradicted the docs,
+blocked you: gaps in its documentation, behavior that contradicted the docs,
 responses that differ from the real vendor, failures you could not attribute.
-Include request and response evidence. Give that list to the user verbatim at
-the end — it goes back to Veris, and it is how the twins improve.
+Include request/response evidence. Give that list to the user verbatim at the
+end — it goes back to Veris, and it is how the twins improve.
 
 ## Ask before
 
-Installing veris-proxy, registering the MCP server, or sending repo code to a
-new external destination. Sandbox lifecycle operations (`create_sandbox`,
-`reset_sandbox`, `delete_sandbox`, `promote_sandbox`) are routine and yours.
+- installing veris-proxy
+- registering the MCP server (the user runs this — it needs a restart)
+- anything that sends repo code or data to a new external destination
+
+Sandbox lifecycle operations (`create_sandbox`, `reset_sandbox`,
+`delete_sandbox`, `promote_sandbox`) are routine and yours to perform freely.
