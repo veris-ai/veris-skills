@@ -28,7 +28,7 @@ ok docker
 env_id="${1:-${VERIS_ENVIRONMENT_ID:-}}"
 [ -n "$env_id" ] \
   || fail environment "export VERIS_ENVIRONMENT_ID or pass an environment id"
-body="$(curl -sS -m 20 -H "Authorization: Bearer $VERIS_API_KEY" "$base/v1/environments/$env_id")" \
+body="$(curl -sS -m 20 -H "X-API-Key: $VERIS_API_KEY" "$base/v1/environments/$env_id")" \
   || fail environment "control plane $base unreachable"
 case "$body" in
   *'"id"'*) ;;
@@ -41,9 +41,14 @@ esac
 
 if [ -f .veris/setup.json ]; then
   image="$(sed -n 's/.*"image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .veris/setup.json | head -1)"
-  if [ -n "$image" ]; then
+  dockerfile="$(sed -n 's/.*"dockerfile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .veris/setup.json | head -1)"
+  # A stock image is pulled by the run itself; only a tag built from a
+  # recorded Dockerfile has to exist locally before the run can start.
+  if [ -n "$image" ] && [ -n "$dockerfile" ]; then
     docker image inspect "$image" >/dev/null 2>&1 \
-      || fail image "$image (named by .veris/setup.json) is not built; docker build -f Dockerfile.veris -t $image ."
+      || fail image "$image (built from $dockerfile, per .veris/setup.json) is not built; docker build -f $dockerfile -t $image ."
     ok image "$image"
+  elif [ -n "$image" ]; then
+    ok image "$image (stock image; the run pulls it)"
   fi
 fi

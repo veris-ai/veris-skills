@@ -26,7 +26,8 @@ code, watch it stop happening — and be able to prove all three.
 ## The run
 
 One command — proxy container, workload container, environment, trust,
-receipt and teardown are all its job. `.veris/run.sh` carries it; with no
+receipt and teardown are all its job. `.veris/run.sh` carries it: flags before
+`--` pass through, a command after `--` replaces its default. With no
 `run.sh` the shape is:
 
 ```bash
@@ -89,12 +90,12 @@ branch; its author never notices, because the tests they write encode the same
 guess the fix does.
 
 **Iterate in one session.** Wiring a suite into a container rarely works first
-try, and each relaunch redeploys a sandbox. Start the run with `-- sleep
+try, and each relaunch redeploys a sandbox. Start the run with `.veris/run.sh -- sleep
 infinity &`, then `docker exec "$(docker ps -q -f name=veris-workload-)" bash
 -lc '<one pass>'` as many times as the work needs; `kill %1` ends it and
 prints the receipt for the whole session. Several steps in one interception
-also chain through the image's shell: `-- bash -lc 'python seed.py && pytest
-tests/integration -x'`.
+also chain through the image's shell: `.veris/run.sh -- bash -lc 'python
+seed.py && pytest tests/integration -x'`.
 
 ## Done means
 

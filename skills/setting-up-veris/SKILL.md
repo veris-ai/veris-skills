@@ -65,10 +65,27 @@ the `Dockerfile.veris` rules, and the one uid constraint.
 
 ## 4. Record the invocation
 
-Write `.veris/run.sh` — `#!/usr/bin/env sh`, `set -eu`, and one `exec
-veris-proxy run --environment "${VERIS_ENVIRONMENT_ID:?}" --image <tag>
-<mounts> "$@" -- <test command>`, so extra flags pass through — and
-`.veris/setup.json` with `environment_id`, `image`, `dockerfile`, `workdir`,
+Write `.veris/run.sh`. Flags before `--` pass through; a command after `--`
+replaces the recorded default, so the same file runs the suite, one test, or
+an open session:
+
+```sh
+#!/usr/bin/env sh
+# Written by the setting-up-veris skill. Read it before running it.
+#   .veris/run.sh                      the recorded test command
+#   .veris/run.sh --strict             extra flags pass through
+#   .veris/run.sh -- pytest -x tests/integration/test_one.py
+set -eu
+for arg in "$@"; do
+  [ "$arg" = "--" ] && exec veris-proxy run --environment "${VERIS_ENVIRONMENT_ID:?}" \
+    --image myrepo-veris-tests -v "$PWD:/work" -w /work "$@"
+done
+exec veris-proxy run --environment "${VERIS_ENVIRONMENT_ID:?}" \
+  --image myrepo-veris-tests -v "$PWD:/work" -w /work "$@" -- make integration
+```
+
+Write `.veris/setup.json` beside it with the same facts as data:
+`environment_id`, `image`, `dockerfile` (`null` for a stock image), `workdir`,
 `mounts`, `test_command`. Both are repo content: a later session reads them
 before running them and holds every flag to what this skill would derive
 (mount sources under the repo tree or a known dependency cache; nothing that
