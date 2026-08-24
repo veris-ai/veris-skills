@@ -7,7 +7,7 @@ Skills for coding agents that use the [Veris AI](https://veris.ai) simulation pl
 | Skill | What it does |
 | --- | --- |
 | [`agent-integration`](skills/agent-integration) | Integrate a raw customer agent repo with Veris end-to-end: `.veris/veris.yaml`, `Dockerfile.sandbox`, env vars, and `veris env push`. |
-| [`integration-testing`](skills/integration-testing) | Run a repo's integration tests against a Veris dependency sandbox: veris-proxy runs the tests in a container beside a kernel-level interception proxy (any runtime, image unmodified), and a per-service receipt proves the sandbox actually received the traffic. |
+| `integration-testing` | Retired. Testing against a Veris environment is the `veris-sim` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins): `setting-up-veris`, `discovering-vendor-behavior`, `integration-testing`. |
 
 More coming soon (scenario creation, running simulations, …).
 
