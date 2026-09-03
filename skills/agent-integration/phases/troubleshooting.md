@@ -2,21 +2,40 @@
 
 Common integration issues organized by symptom.
 
-## `veris-cli` bootstrap problems
+## `veris-sim-cli` bootstrap problems
 
 ### `veris` command not found
 
 Install the CLI first:
 
 ```bash
-uv tool install veris-cli
+uv tool install veris-sim-cli
 ```
 
 Fallback:
 
 ```bash
-pip install veris-cli
+pip install veris-sim-cli
 ```
+
+### `Executable already exists: veris`
+
+The CLI was renamed from `veris-cli` to `veris-sim-cli`. Both ship the same
+`veris` executable, so the new package cannot be installed alongside the old
+one. Switch instead:
+
+```bash
+uv tool uninstall veris-cli
+uv tool install veris-sim-cli
+```
+
+For a pip install: `pip uninstall veris-cli` then `pip install veris-sim-cli`.
+
+### `veris --version` reports an old release that never updates
+
+You are still on `veris-cli`, which is frozen at 2.34.0. `uv tool upgrade
+veris-cli` keeps succeeding and keeps resolving that same version. Switch
+using the commands above.
 
 ### `veris env push` says no environment is configured
 
@@ -189,7 +208,7 @@ If `veris env push` returns `[409] Run veris env submit first to complete manage
 For this skill's audience (self-authoring `.veris/`), `--self-serve` at create time is the right fix. Three recovery paths in increasing order of effort:
 
 1. **You forgot `--self-serve`:** `veris env delete <env-id>`, then `veris env create --self-serve --name <name>`. Re-set any `veris env vars set` values on the new env, and update `.veris/config.yaml` if the env id changed.
-2. **Your CLI doesn't show `--self-serve`:** upgrade to veris-cli 2.27.0 or newer using the install manager that owns `veris` (`uv tool upgrade veris-cli` or `pip install -U veris-cli`), then take path 1.
+2. **Your CLI doesn't show `--self-serve`:** you are on an old `veris-cli`. Switch to `veris-sim-cli` (see [`veris-sim-cli` bootstrap problems](#veris-sim-cli-bootstrap-problems)), then take path 1.
 3. **You actually want managed onboarding:** run `veris env submit`, wait for the Veris team's email, then `veris env config pull` followed by `veris env push`.
 
 ## Base image runtime version too old for agent

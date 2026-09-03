@@ -1,6 +1,6 @@
 ---
 name: agent-integration
-description: Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.
+description: Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-sim-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.
 ---
 
 Integrate this agent repo with Veris from scratch.
@@ -65,7 +65,7 @@ This is sanctioned only for client-tool grader visibility, only for voice agents
 - Prefer the current `actor.channels` schema and canonical service names. Do not generate legacy `persona.modality`, `email_address`, or old service aliases unless the user explicitly asks for compatibility.
 - Do not write Python wrappers, shell shims, or any "adapter" code that translates between Veris and the agent. Use the agent's real production interface. If that isn't possible as-is, surface it as a platform gap, not as a wrapper opportunity.
 - Ask before external or irreversible actions:
-  - installing `veris-cli`
+  - installing `veris-sim-cli`
   - running `veris login`
   - running `veris env create`
   - setting environment variables with `veris env vars set`
@@ -119,13 +119,26 @@ Tell the user: "I'm going to make sure this repo has the Veris tooling and envir
 
 Confirm the directory is an agent repo, not just a parent folder. Look for source code, dependency manifests, and app entrypoints.
 
-### 0.2 Verify `veris-cli`
+### 0.2 Verify `veris-sim-cli`
 
-Check whether `veris` is installed and working.
+Check whether `veris` runs, and which distribution provides it. A working
+`veris` is not enough on its own: the CLI was renamed from `veris-cli` to
+`veris-sim-cli`, and the old package still installs and still answers to
+`veris`. `uv tool list` names the installed package; for a pip install, ask
+`pip show veris-sim-cli`.
 
-If not installed:
-- Prefer `uv tool install veris-cli`
-- Fallback: `pip install veris-cli`
+- **Nothing installed.** Prefer `uv tool install veris-sim-cli`, fallback
+  `pip install veris-sim-cli`.
+- **The old `veris-cli` is installed.** Switch, do not install alongside. Both
+  ship the same `veris` executable, so `uv tool install` refuses to overwrite
+  it with `Executable already exists: veris`:
+
+  ```bash
+  uv tool uninstall veris-cli
+  uv tool install veris-sim-cli
+  ```
+
+  For a pip install: `pip uninstall veris-cli` then `pip install veris-sim-cli`.
 
 Explain which install path you are using and why.
 
@@ -152,7 +165,7 @@ If `.veris/` does not exist, or it exists but has no environment binding:
 2. Show the user the proposed name.
 3. On approval, run `veris env create --self-serve --name "<name>"`.
 
-`--self-serve` (`veris-cli >= 2.27.0`) is the right mode for this skill's audience: you are authoring `.veris/` yourself, and the env should be ready for `veris env push` immediately. Without it, `env create` defaults to managed-setup mode where the Veris team generates `Dockerfile.sandbox` + `veris.yaml` for the customer, and `veris env push` returns `409: Run veris env submit first` until that setup completes. If `veris env create --help` doesn't list `--self-serve`, bump the CLI first using the install manager that owns `veris` (`uv tool upgrade veris-cli` or `pip install -U veris-cli`). For recovery from an env that was already created without `--self-serve`, see [phases/troubleshooting.md](phases/troubleshooting.md#veris-env-push-returns-409-managed-onboarding).
+`--self-serve` (every `veris-sim-cli` release, or `veris-cli >= 2.27.0`) is the right mode for this skill's audience: you are authoring `.veris/` yourself, and the env should be ready for `veris env push` immediately. Without it, `env create` defaults to managed-setup mode where the Veris team generates `Dockerfile.sandbox` + `veris.yaml` for the customer, and `veris env push` returns `409: Run veris env submit first` until that setup completes. If `veris env create --help` doesn't list `--self-serve`, you are on an old `veris-cli`; switch to `veris-sim-cli` as described in step 0.2. For recovery from an env that was already created without `--self-serve`, see [phases/troubleshooting.md](phases/troubleshooting.md#veris-env-push-returns-409-managed-onboarding).
 
 Explain what `veris env create` gives them:
 - `.veris/veris.yaml` — Veris simulation config
