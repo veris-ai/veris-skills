@@ -6,7 +6,7 @@ Skills for coding agents that use the [Veris AI](https://veris.ai) simulation pl
 
 | Skill | What it does |
 | --- | --- |
-| [`agent-integration`](skills/agent-integration) | Integrate a raw customer agent repo with Veris end-to-end: `.veris/veris.yaml`, `Dockerfile.sandbox`, env vars, and `veris env push`. |
+| `agent-integration` | Retired 2026-09-28. It targeted the Veris simulation platform, which shuts down 2026-10-31. Twins setup is the `veris` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins). |
 | `integration-testing` | Retired. Testing against a Veris environment is the `veris-sim` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins): `setting-up-veris`, `discovering-vendor-behavior`, `integration-testing`. |
 
 More coming soon (scenario creation, running simulations, …).
