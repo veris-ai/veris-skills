@@ -6,7 +6,7 @@ Skills for coding agents that use the [Veris AI](https://veris.ai) simulation pl
 
 | Skill | What it does |
 | --- | --- |
-| `agent-integration` | Retired 2026-09-28. It targeted the Veris simulation platform, which shuts down 2026-10-31. Twins setup is the `veris` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins). |
+| `agent-integration` | Retired. It targeted the Veris simulation platform, which retired on 2026-10-15 and is replaced by Veris Bench. Twins setup is the `veris` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins). |
 | `integration-testing` | Retired. Testing against a Veris environment is the `veris-sim` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins): `setting-up-veris`, `discovering-vendor-behavior`, `integration-testing`. |
 
 More coming soon (scenario creation, running simulations, …).

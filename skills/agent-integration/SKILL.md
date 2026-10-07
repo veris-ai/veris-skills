@@ -1,6 +1,6 @@
 ---
 name: agent-integration
-description: 'RETIRED 2026-09-28: targets the shut-down simulation platform; do not use. Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.'
+description: 'RETIRED: targets the Veris simulation platform, which retired on 2026-10-15; do not use. Integrate a raw customer agent repo with Veris end to end. Installs or verifies veris-cli, logs in, creates or reuses a Veris environment, analyzes the repo, generates or updates `.veris/veris.yaml`, `.veris/Dockerfile.sandbox`, `.veris/.dockerignore`, configures runtime env vars, and can finish with `veris env push`. Use when a repo has no Veris setup yet, or when an existing `.veris/` integration is stale and needs to be refreshed.'
 ---
 
 Integrate this agent repo with Veris from scratch.
