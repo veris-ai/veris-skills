@@ -1,45 +1,17 @@
 # veris-skills
 
-Skills for coding agents that use the [Veris AI](https://veris.ai) simulation platform.
+This repository is retired. It held skills for coding agents that used the Veris simulation platform, which retired on 2026-10-15 and is replaced by [Veris Bench](https://benchmark.veris.ai).
 
-## Skills
+The skills were removed rather than left in place, so that `npx skills add veris-ai/veris-skills/...` fails clearly instead of installing instructions for a platform that no longer answers.
 
-| Skill | What it does |
+| Former skill | Where to go now |
 | --- | --- |
-| `agent-integration` | Retired. It targeted the Veris simulation platform, which retired on 2026-10-15 and is replaced by Veris Bench. Twins setup is the `veris` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins). |
-| `integration-testing` | Retired. Testing against a Veris environment is the `veris-sim` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins): `setting-up-veris`, `discovering-vendor-behavior`, `integration-testing`. |
+| `agent-integration` | Removed. It installed the retired simulation CLI and pushed agents to the retired platform. Testing your code against Veris twins is the `veris` plugin in [veris-ai/plugins](https://github.com/veris-ai/plugins). |
+| `integration-testing` | Removed earlier. Same plugin: `setting-up-veris`, `discovering-vendor-behavior`, `integration-testing`. |
 
-More coming soon (scenario creation, running simulations, …).
+If you still have `agent-integration` installed locally, remove it with the same CLI you installed it with (for example `npx skills remove agent-integration`), or delete it from your agent's skills directory.
 
-## Install
-
-Works across Claude Code, OpenAI Codex CLI, Cursor, and 40+ other coding agents via the [`skills`](https://github.com/vercel-labs/skills) CLI. It autodetects which agents you have installed and places files in the right location for each.
-
-Browse and install skills from this repo:
-
-```bash
-npx skills add veris-ai/veris-skills
-```
-
-Install a specific skill directly:
-
-```bash
-npx skills add veris-ai/veris-skills/skills/agent-integration
-```
-
-## Use
-
-From inside any agent repo:
-
-```
-/agent-integration
-```
-
-Or point at a different repo:
-
-```
-/agent-integration path/to/agent/repo
-```
+Questions: hello@veris.ai. Details: https://docs.veris.ai/deprecation
 
 ## License
 
